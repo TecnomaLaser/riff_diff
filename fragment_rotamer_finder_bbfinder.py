@@ -23,6 +23,7 @@ sys.path.append("/home/mabr3112/riff_diff")
 #sys.path.append("/home/tripp/riff_diff/")
 
 import utils.adrian_utils as utils
+import utils.plotting as plots
 
 def split_pdb_numbering(pdbnum):
     resnum = ""
@@ -54,6 +55,7 @@ def return_residue_rotamer_library(library_folder:str, residue_identity:str):
         rotlib.drop(['chi3', 'chi3sig', 'chi4', 'chi4sig'], axis=1, inplace=True)
     elif residue_identity in AAs_up_to_chi1():
         rotlib.drop(['chi2', 'chi2sig', 'chi3', 'chi3sig', 'chi4', 'chi4sig'], axis=1, inplace=True)
+
     return rotlib
 
 def AAs_up_to_chi1():
@@ -72,13 +74,25 @@ def AAs_up_to_chi4():
     AAs = ['ARG', 'LYS']
     return AAs
 
+def num_chis_for_residue_id(res_id):
+    if res_id in AAs_up_to_chi4():
+        return 4
+    if res_id in AAs_up_to_chi3():
+        return 3
+    elif res_id in AAs_up_to_chi2():
+        return 2
+    elif res_id in AAs_up_to_chi1():
+        return 1
+    else:
+        return 0
+
+
 
 def rama_plot_old(df, x, y, color_column, size_column, filename):
     '''
     plots phi and psi angles
     '''
     # Normalize the values in the color & size column
-    data = copy.deepcopy(df)
     norm_color = Normalize(vmin=0, vmax=data[color_column].max())
     norm_size = Normalize(vmin=0, vmax=data[size_column].max())
     # Create a colormap with white to blue gradient
@@ -87,7 +101,7 @@ def rama_plot_old(df, x, y, color_column, size_column, filename):
     colors = cmap(norm_color(data[color_column]))
     # Set the size of dots according to the values in the size column
     data['norm_size'] = norm_size(data[size_column])
-    size = data['norm_size'] * 30
+    size = data['norm_size'] * 3000
     plt.figure()
     plt.scatter(data[x], data[y], c=colors, s=size, marker=".")
 
@@ -103,6 +117,7 @@ def rama_plot_old(df, x, y, color_column, size_column, filename):
     plt.gca().set_aspect('equal', adjustable='box')
     plt.savefig(f'{filename}.png', dpi=300)
     plt.show()
+    return
 
 def rama_plot(df, x_col, y_col, color_col, size_col, save_path=None):
     df_list = []
@@ -129,7 +144,7 @@ def rama_plot(df, x_col, y_col, color_col, size_col, save_path=None):
     if save_path:
         plt.savefig(save_path, dpi=300)
 
-def identify_backbone_angles_suitable_for_rotamer(residue_identity:str, rotlib:pd.DataFrame(), output_prefix:str=None, output_dir:str=None, limit_sec_struct:str=None, occurrence_cutoff:int=5, max_output:int=None, rotamer_diff_to_best=0.05, rotamer_binsize=None, prob_cutoff=None):
+def identify_backbone_angles_suitable_for_rotamer(residue_identity:str, rotlib:pd.DataFrame(), output_prefix:str=None, output_dir:str=None, limit_sec_struct:str=None, occurrence_cutoff:int=5, max_output:int=None, rotamer_diff_to_best=0.05, rotamer_chi_binsize=None, rotamer_phipsi_binsize=None, prob_cutoff=None):
     '''
     finds phi/psi angles most common for a given set of chi angles from a rotamer library
     chiX_bin multiplies the chiXsigma that is used to check if a rotamer fits to the given set of chi angles --> increasing leads to higher number of hits, decreasing leads to rotamers that more closely resemble input chis. Default=1
@@ -148,27 +163,28 @@ def identify_backbone_angles_suitable_for_rotamer(residue_identity:str, rotlib:p
         rotlib = filter_rotamers_by_sec_struct(rotlib, limit_sec_struct)
 
     if occurrence_cutoff:
-        rotlib = rotlib.loc[rotlib['phi_psi_occurrence'] > occurrence_cutoff]
+        rotlib = rotlib.loc[rotlib['phi_psi_occurrence'] > occurrence_cutoff / 100]
         if rotlib.empty:
-            print(f"No rotamers passed occurrence cutoff of {occurrence_cutoff}")
+            log_and_print(f"No rotamers passed occurrence cutoff of {occurrence_cutoff}")
             logging.error(f"No rotamers passed occurrence cutoff of {occurrence_cutoff}")
-
-    if rotamer_diff_to_best:
-        rotlib = rotlib[rotlib['probability'] >= rotlib['probability'].max() * (1 - rotamer_diff_to_best)]
 
     if prob_cutoff:
         rotlib = rotlib[rotlib['probability'] >= prob_cutoff]
         if rotlib.empty:
-            print(f"No rotamers passed probability cutoff of {prob_cutoff}")
+            log_and_print(f"No rotamers passed probability cutoff of {prob_cutoff}")
             logging.error(f"No rotamers passed probability cutoff of {prob_cutoff}")
 
-    rotlib = rotlib.sort_values(["probability", "phi_psi_occurrence"], ascending=False)
+    rotlib = rotlib.sort_values('rotamer_score', ascending=False)
 
-    if rotamer_binsize:
-        rotlib = filter_rotlib_for_rotamer_diversity(rotlib, rotamer_binsize)
+    if rotamer_chi_binsize and rotamer_phipsi_binsize:
+        rotlib = filter_rotlib_for_rotamer_diversity(rotlib, rotamer_chi_binsize, rotamer_phipsi_binsize)
 
     if max_output:
         rotlib = rotlib.head(max_output)
+
+    if rotamer_diff_to_best:
+        rotlib = rotlib[rotlib['probability'] >= rotlib['probability'].max() * (1 - rotamer_diff_to_best)]
+
     if rotlib.empty:
         raise RuntimeError('Could not find any rotamers that fit. Try setting different filter values!')
 
@@ -179,11 +195,13 @@ def identify_backbone_angles_suitable_for_rotamer(residue_identity:str, rotlib:p
 
     return rotlib
 
-def filter_rotlib_for_rotamer_diversity(rotlib, rotamer_binsize):
+def angle_difference(angle1, angle2):
+
+    return min([abs(angle1 - angle2), abs(angle1 - angle2 + 360), abs(angle1 - angle2 - 360)])
+
+def filter_rotlib_for_rotamer_diversity(rotlib, rotamer_chi_binsize, rotamer_phipsi_binsize):
     accepted_rotamers = []
     chi_columns = [column for column in rotlib.columns if column.startswith('chi') and not column.endswith('sig')]
-    for angle in chi_columns:
-        rotlib.loc[rotlib[angle] < 0, angle] += 360
 
     for index, row in rotlib.iterrows():
         accept_list = []
@@ -192,11 +210,18 @@ def filter_rotlib_for_rotamer_diversity(rotlib, rotamer_binsize):
             continue
         for accepted_rot in accepted_rotamers:
             column_accept_list = []
+            phipsi_difference = sum([angle_difference(row['phi'], accepted_rot['phi']), angle_difference(row['psi'], accepted_rot['psi'])])
             for column in chi_columns:
-                if np.minimum(abs(row[column] - accepted_rot[column]), abs(row[column] - accepted_rot[column] + 360)) >= rotamer_binsize / 2:
+                #only accept rotamers that are different from already accepted ones
+                if angle_difference(row[column], accepted_rot[column]) >= rotamer_chi_binsize / 2:
                     column_accept_list.append(True)
                 else:
-                    column_accept_list.append(False)
+                    #still accept rotamers that are similar if their backbone angles are different enough
+                    if phipsi_difference >= rotamer_phipsi_binsize:
+                        column_accept_list.append(True)
+                    #kick out everything were both is similar
+                    else:
+                        column_accept_list.append(False)
             if True in column_accept_list:
                 accept_list.append(True)
             else:
@@ -204,8 +229,6 @@ def filter_rotlib_for_rotamer_diversity(rotlib, rotamer_binsize):
         if set(accept_list) == {True}:
             accepted_rotamers.append(row)
     rotlib = pd.DataFrame(accepted_rotamers)
-    for angle in chi_columns:
-        rotlib.loc[rotlib[angle] > 180, angle] -= 360
     return rotlib
 
 
@@ -255,7 +278,7 @@ def filter_rotamers_by_sec_struct(rotlib:pd.DataFrame, secondary_structure:str):
         filtered_list.append(filtered)
     rotlib = pd.concat(filtered_list)
     if rotlib.empty:
-        print(f"No rotamers passed secondary structure filtering for secondary structure {secondary_structure}.")
+        log_and_print(f"No rotamers passed secondary structure filtering for secondary structure {secondary_structure}.")
         logging.error(f"No rotamers passed secondary structure filtering for secondary structure {secondary_structure}.")
     return rotlib
 
@@ -417,19 +440,34 @@ def atoms_of_functional_groups():
 
 def sort_frags_df_by_score(fragment_df, scoretype):
     score_df_list = []
+    init = time.time()
+    fragment_df['phi_rounded'] = fragment_df['phi'].round(-1)
+    fragment_df['psi_rounded'] = fragment_df['psi'].round(-1)
     for fragment, df in fragment_df.groupby('frag_num', sort=False):
+        #rotamer score has to be in here because otherwise fragments with same phi/psi, but different chis would get filtered
+        df['phi_psi_prob'] = [df['phi_rounded'].to_list() + df['psi_rounded'].to_list() + df['rotamer_score'].to_list() + df['rotamer_pos'].to_list() for i in range(0, len(df.index))]
+        df['phi_psi_prob'] = df['phi_psi_prob'].astype(str)
         score_df_list.append((df[scoretype].mean(), df))
 
     #sort fragments by average score
     if len(score_df_list) > 1:
-        score_df_list.sort(key=lambda x: x[0])
+        score_df_list.sort(key=lambda x: x[0], reverse=True)
 
     #assemble dataframe
     score_sorted_list = []
+    count = 0
     for score_df in score_df_list:
         df = score_df[1]
         score_sorted_list.append(df)
+        count += 1
     fragment_df = pd.concat(score_sorted_list)
+
+    #remove all fragments with same phi/psi/chi angles
+    filtered = fragment_df.drop_duplicates('phi_psi_prob', keep="first")[['frag_num', 'phi_psi_prob']]
+    log_and_print(f"Removed {count - len(filtered.index)} fragments with similar backbone angles.")
+    fragment_df = fragment_df.drop('phi_psi_prob', axis=1).merge(filtered, how='inner', on='frag_num').reset_index(drop=True).drop(['phi_psi_prob', 'phi_rounded', 'psi_rounded'], axis=1)
+
+
     return fragment_df
 
 def calculate_rmsd_bb(entity1, entity2):
@@ -466,45 +504,81 @@ def create_fragment_from_df(df:pd.DataFrame()):
 
     return chain
 
-def identify_positions_for_rotamer_insertion(fraglib, rotlib, rot_sec_struct, phi_psi_binsize, limit_frags_to_chi, limit_frags_to_res_id):
+def check_if_angle_in_bin(df, phi, psi, phi_psi_bin):
 
-    phi_psi_binsize = phi_psi_binsize / 2
+    df['phi_difference'] = df.apply(lambda row: angle_difference(row['phi'], phi), axis=1)
+    df['psi_difference'] = df.apply(lambda row: angle_difference(row['psi'], psi), axis=1)
+
+    df = df[(df['psi_difference'] < phi_psi_bin / 2) & (df['phi_difference'] < phi_psi_bin / 2)]
+    df = df.drop(['phi_difference', 'psi_difference'], axis=1)
+    return df
+
+
+def identify_positions_for_rotamer_insertion(fraglib, rotlib, rot_sec_struct, limit_frags_to_chi, limit_frags_to_res_id, phi_psi_bin) -> pd.DataFrame:
+
     #convert string to list
     if rot_sec_struct:
         rot_sec_struct = [*rot_sec_struct]
 
     #add 360 to all negative angles
-    angles = ['phi', 'psi', 'chi1', 'chi2', 'chi3', 'chi4']
+    angles = ['chi1', 'chi2', 'chi3', 'chi4']
     columns = list(rotlib.columns)
-    for angle in [column for column in columns if column in angles]:
-        rotlib.loc[rotlib[angle] < 0, angle] += 360
     rotamer_positions_list = []
     for index, row in rotlib.iterrows():
         #filter based on difference & amino acid identity
-        rotamer_positions = fraglib.loc[(np.minimum(abs(fraglib['phi'] - row['phi']), abs(fraglib['phi'] - row['phi'] + 360)) <= phi_psi_binsize) & (np.minimum(abs(fraglib['psi'] - row['psi']), abs(fraglib['psi'] - row['psi'] + 360)) <= phi_psi_binsize)]
+        rotamer_positions = check_if_angle_in_bin(fraglib, row['phi'], row['psi'], phi_psi_bin)
+        if rotamer_positions.empty:
+            continue
         if limit_frags_to_res_id == True:
-            rotamer_positions = rotamer_positions.loc[fraglib['AA'] == row['identity']]
+            rotamer_positions = rotamer_positions[rotamer_positions['AA'] == row['identity']]
         if rotamer_positions.empty:
             continue
         if rot_sec_struct:
-            rotamer_positions = rotamer_positions.loc[fraglib['ss'].isin(rot_sec_struct)]
+            rotamer_positions = rotamer_positions[rotamer_positions['ss'].isin(rot_sec_struct)]
         if rotamer_positions.empty:
             continue
-        for chi in [column for column in columns if column in ['chi1', 'chi2', 'chi3', 'chi4']]:
-            if limit_frags_to_chi == True:
-                #filter for positions that have chi angles within 2 stdev from input chis
-                rotamer_positions = rotamer_positions.loc[(np.minimum(abs(rotamer_positions[chi] - row[chi]), abs(rotamer_positions[chi] - row[chi] + 360)) < 2 * row[f'{chi}sig'])]
-            #change chi angles to mean value from bin
-            rotamer_positions[chi] = row[chi]
-
+        
+        if num_chis_for_residue_id(row['identity']) > 0:
+            for chi_angle in range(1, num_chis_for_residue_id(row['identity']) + 1):
+                chi = f"chi{chi_angle}"
+                if limit_frags_to_chi == True:
+                    #filter for positions that have chi angles within 2 stdev from input chis
+                    rotamer_positions[f'{chi}_difference'] = rotamer_positions.apply(lambda line: angle_difference(line[chi], row[chi]), axis=1)
+                    rotamer_positions = rotamer_positions[rotamer_positions[f'{chi}_difference'] < row[f'{chi}sig']]
+                    rotamer_positions.drop(f'{chi}_difference', axis=1, inplace=True)
+                #change chi angles to mean value from bin
+                rotamer_positions[chi] = row[chi]
         rotamer_positions['probability'] = row['probability']
+        rotamer_positions['phi_psi_occurrence'] = row['phi_psi_occurrence']
+        rotamer_positions['rotamer_score'] = row['rotamer_score']
+        rotamer_positions['log_occurrence'] = row['log_occurrence']
+        log_and_print(f"Found {len(rotamer_positions.index)} positions for {row['identity']} rotamer {index}")
         rotamer_positions_list.append(rotamer_positions)
 
     if not rotamer_positions_list:
         raise RuntimeError('Could not find any fragment positions that fit criteria. Try adjusting rotamer secondary structure or use different rotamers!')
     elif len(rotamer_positions_list) > 1:
         rotamer_positions = pd.concat(rotamer_positions_list)
+    else:
+        rotamer_positions = rotamer_positions_list[0]
+    
     return rotamer_positions
+
+def normalize_col(df:pd.DataFrame, col:str, scale:bool=False) -> pd.DataFrame:
+    ''''''
+    median = df[col].median()
+    std = df[col].std()
+    if std == 0 or len(set(df[col].to_list())) == 1:
+        df[f"{col}_normalized"] = 0
+        return df
+    df[f"{col}_normalized"] = (df[col] - median) / std
+    if scale == True:
+        #scale everything so that values range from 0 to 1
+        factor = df[f"{col}_normalized"].max() - df[f"{col}_normalized"].min()
+        df[f"{col}_normalized"] = df[f"{col}_normalized"] / factor
+        df[f"{col}_normalized"] = df[f"{col}_normalized"] + (1 - df[f"{col}_normalized"].max())
+        df[f"{col}_normalized"]
+    return df
 
 def extract_fragments(rotamer_positions_df, fraglib, frag_pos_to_replace, fragsize):
     '''
@@ -531,8 +605,11 @@ def extract_fragments(rotamer_positions_df, fraglib, frag_pos_to_replace, fragsi
                 fragnum = fragnum + 1
                 df.loc[:, 'frag_num'] = fragnum
                 df.loc[:, 'rotamer_pos'] = int(pos)
-                prob = row['probability']
-                df.at[index, 'probability'] = prob
+                df.at[index, 'probability'] = row['probability']
+                df.at[index, 'phi_psi_occurrence'] = row['phi_psi_occurrence'] * 100
+                #set occurrence score to log_occurrence of the rotamer identity at rotamer position since the AA identity is fixed
+                df.at[index, 'occurrence_score'] = row['log_occurrence']
+                df['rotamer_score'] = row['rotamer_score']
                 frag_dict[pos].append(df)
 
     for pos in frag_dict:
@@ -540,6 +617,8 @@ def extract_fragments(rotamer_positions_df, fraglib, frag_pos_to_replace, fragsi
             frag_dict[pos] = pd.concat(frag_dict[pos])
         else:
             frag_dict[pos] = pd.DataFrame()
+        frag_dict[pos].to_csv(f'test_{pos}.csv')
+
     return frag_dict
 
 def is_unique(s):
@@ -567,7 +646,6 @@ def attach_rotamer_to_fragments(df, frag, AA_alphabet):
     return rotamer_on_fragments
 
 def attach_rotamer_to_backbone(fragment, fragment_residue, rotamer):
-    #fragment = copy.deepcopy(fragment)
     fragment.detach_child(fragment_residue.id)
     to_mutate_atoms = []
     res_atoms = []
@@ -645,17 +723,7 @@ def generate_rotamer(AAalphabet_structure, residue_identity:str, res_id, phi:flo
             if C_O_length:
                 res.internal_coord.set_length("C:O", C_O_length)
 
-
-            if residue_identity in AAs_up_to_chi4():
-                max_chis = 4
-            elif residue_identity in AAs_up_to_chi3():
-                max_chis = 3
-            elif residue_identity in AAs_up_to_chi2():
-                max_chis = 2
-            elif residue_identity in AAs_up_to_chi1():
-                max_chis = 1
-            else:
-                max_chis = 0
+            max_chis = num_chis_for_residue_id(residue_identity)
 
             if max_chis > 0:
                 res.internal_coord.bond_set("chi1", chi1)
@@ -721,6 +789,19 @@ def rotate_histidine_fragment(entity, degrees, theozyme_residue, his_central_ato
     elif his_central_atom == "ND1":
         half = theozyme_residue["NE2"].coord + 0.5 * (theozyme_residue["CD2"].coord - theozyme_residue["NE2"].coord)
     entity = rotate_entity_around_axis(entity, theozyme_residue[his_central_atom].coord, half, degrees)
+    
+    return entity
+
+def rotate_phenylalanine_fragment(entity, degrees, theozyme_residue):
+
+    center = theozyme_residue["CZ"].coord - 0.5 * (theozyme_residue["CZ"].coord - theozyme_residue["CG"].coord)
+    vector_A = theozyme_residue["CG"].coord - theozyme_residue["CZ"].coord
+    vector_B = theozyme_residue["CE1"].coord - theozyme_residue["CZ"].coord
+    N = np.cross(vector_A, vector_B)
+    N = N / np.linalg.norm(N)
+    point = center + N
+
+    entity = rotate_entity_around_axis(entity, center, point, degrees)
     
     return entity
 
@@ -848,13 +929,15 @@ def rotamers_for_backbone(resnames, rotlib_path, phi, psi, rot_prob_cutoff:float
     rotlib_list = []
     for res in resnames:
         if res in ["ALA", "GLY"]:
-            rotlib = pd.DataFrame([[res, phi, psi, float("nan"), 1, float("nan")]], columns=["AA", "phi", "psi", "count", "probability", "phi_psi_occurrence"])
+            #TODO: assign proper scores for log prob and occurrence
+            rotlib = pd.DataFrame([[res, phi, psi, float("nan"), 1, float("nan"), 0, 0]], columns=["AA", "phi", "psi", "count", "probability", "phi_psi_occurrence", "log_prob", "log_occurrence"])
             rotlib_list.append(rotlib)
         else:
             rotlib = return_residue_rotamer_library(rotlib_path, res)
             rotlib_list.append(identify_rotamers_suitable_for_backbone(res, phi, psi, rotlib, rot_prob_cutoff, max_rotamers, max_stdev, level))
     if len(rotlib_list) > 1:
         filtered_rotlib = pd.concat(rotlib_list)
+        filtered_rotlib = filtered_rotlib.sort_values("probability", ascending=False)
         filtered_rotlib.reset_index(drop=True, inplace=True)
         return filtered_rotlib
     else:
@@ -874,6 +957,7 @@ def identify_rotamers_suitable_for_backbone(residue_identity:str, phi:float, psi
         psi = round(psi, -1)
     #extract all rows containing specified phi/psi angles from library
     if phi and psi:
+        log_and_print(f"Searching for rotamers in phi/psi bin {phi}/{psi}.")
         rotlib = rotlib.loc[(rotlib['phi'] == phi) & (rotlib['psi'] == psi)].reset_index(drop=True)
     elif not phi or not psi:
         if not phi:
@@ -960,6 +1044,7 @@ def alter_chi(rotlib, chi_column, chi_sig_column, dev):
     new_chis = copy.deepcopy(rotlib)
     new_chis[chi_column] = new_chis[chi_column] + new_chis[chi_sig_column] * dev
     new_chis['probability'] = new_chis['probability'] * normal_dist_density(dev)
+    new_chis['log_prob'] = np.log(new_chis['probability'])
     return new_chis
 
 def exchange_covalent(covalent_bond):
@@ -986,6 +1071,21 @@ def flip_covalent(covalent_bond, residue):
         atom = atom
     return atom + ":" + covalent_bond.split(":")[1]
 
+def log_and_print(string: str): 
+    logging.info(string)
+    print(string)
+    return string
+
+def combine_normalized_scores(df: pd.DataFrame, name:str, scoreterms:list, weights:list, normalize:bool=False, scale:bool=False):
+    if not len(scoreterms) == len(weights):
+        raise RuntimeError(f"Number of scoreterms ({len(scoreterms)}) and weights ({len(weights)}) must be equal!")
+    df[name] = sum([df[col]*weight for col, weight in zip(scoreterms, weights)]) / sum(weights)
+    if normalize == True:
+        df = normalize_col(df, name, scale)
+        df.drop(name, axis=1, inplace=True)
+        df.rename(columns={f'{name}_normalized': name}, inplace=True)
+    return df
+
 
 def main(args):
 
@@ -994,6 +1094,8 @@ def main(args):
     limit_frags_to_res_id = str2bool(args.limit_frags_to_res_id)
     limit_frags_to_chi = str2bool(args.limit_frags_to_chi)
     rotate_histidines = str2bool(args.rotate_histidines)
+    rotate_phenylalanines = str2bool(args.rotate_phenylalanines)
+
     flip_symmetric = str2bool(args.flip_symmetric)
 
     output_dir = utils.path_ends_with_slash(args.output_dir)
@@ -1033,8 +1135,7 @@ def main(args):
                 logging.error(f"If limiting all fragment residues to secondary structure {sec}, it is not possible that the rotamer has secondary structure {args.rot_sec_struct}!")
                 raise KeyError(f"If limiting all fragment residues to secondary structure {sec}, it is not possible that the rotamer has secondary structure {args.rot_sec_struct}!")
             elif (args.fragsize - frac * args.fragsize) < 1 and args.rot_sec_struct == None and len(sec_structs) == 1:
-                logging.info(f"Setting <rot_sec_struct> to {sec} because all residues in fragment have to have secondary structure {sec}!")
-                print(f"Setting <rot_sec_struct> to {sec} because all residues in fragment have to have secondary structure {sec}!")
+                log_and_print(f"Setting <rot_sec_struct> to {sec} because all residues in fragment have to have secondary structure {sec}!")
                 args.rot_sec_struct = sec
             sec_dict[sec] = float(frac)
     else:
@@ -1048,13 +1149,12 @@ def main(args):
         ligand.id = "Z"
         for res in ligand.get_residues():
             res.id = (res.id[0], 1, res.id[2])
-        logging.info(f"Found ligand in chain {args.ligand_chain}.")
-        print(f"Found ligand in chain {args.ligand_chain}.")
+        log_and_print(f"Found ligand in chain {args.ligand_chain}.")
     else:
         ligand = None
         logging.warning(f"WARNING: No ligand chain specified. Was this intentional?")
         if args.his_central_atom == "auto" and theozyme_residue.get_resname() == "HIS":
-            print("Ligand is required if using <flip_histidines='auto'>!")
+            log_and_print("Ligand is required if using <flip_histidines='auto'>!")
             logging.error("Ligand is required if using <flip_histidines='auto'>!")
             raise RuntimeError(f"Ligand is required if using <flip_histidines='auto'>!")
 
@@ -1065,12 +1165,10 @@ def main(args):
         channel = copy.deepcopy(theozyme[0][args.channel_chain])
         channel.detach_parent()
         channel.id = "Q"
-        logging.info(f"Found channel placeholder in chain {args.channel_chain}.")
-        print(f"Found channel placeholder in chain {args.channel_chain}.")
+        log_and_print(f"Found channel placeholder in chain {args.channel_chain}.")
     else:
         channel = None
-        logging.info(f"No channel placeholder chain provided. Channel placeholder will be added automatically in following steps.")
-        print(f"No channel placeholder chain provided. Channel placeholder will be added automatically in following steps.")
+        log_and_print(f"No channel placeholder chain provided. Channel placeholder will be added automatically in following steps.")
 
 
     if len(args.frag_pos_to_replace) == 1:
@@ -1091,7 +1189,7 @@ def main(args):
 
     if args.add_equivalent_func_groups in ["True", "1", "true", "yes", "Yes", "TRUE"]:
         residue_identities = identify_residues_with_equivalent_func_groups(theozyme_residue)
-        logging.info(f"Added residues with equivalent functional groups: {residue_identities}")
+        log_and_print(f"Added residues with equivalent functional groups: {residue_identities}")
     else:
         residue_identities = [theozyme_residue.get_resname()]
 
@@ -1101,29 +1199,32 @@ def main(args):
     if args.fragment_pdb:
 
         #################################### BACKBONE ROTAMER FINDER ####################################
-
+        bbfinder = True
         backbone = utils.import_structure_from_pdb(args.fragment_pdb)
         backbone = clean_input_backbone(backbone)
         backbone_df = create_df_from_fragment(backbone)
         backbone_residues = [res.id[1] for res in backbone.get_residues()]
         rotlibs = []
-        logging.info(f"Identifying rotamers...")
-        print(f"Identifying rotamers...")
+        log_and_print(f"Identifying rotamers...")
         for pos in frag_pos_to_replace:
             if not pos in backbone_residues:
                 raise ValueError(f'Positions for rotamer insertion {frag_pos_to_replace} do not match up with backbone fragment {backbone_residues}')
             backbone_angles = extract_backbone_angles(backbone, pos)
+            log_and_print(f"Position {pos} phi/psi angles: {backbone_angles['phi']} / {backbone_angles['psi']}.")
             rotlib = rotamers_for_backbone(residue_identities, database, backbone_angles["phi"], backbone_angles["psi"], args.prob_cutoff, 100, 2, 2)
             rotlib["rotamer_position"] = pos
-            logging.info(f"Found {len(rotlib.index)} rotamers for position {pos}.")
-            print(f"Found {len(rotlib.index)} rotamers for position {pos}.")
+            log_and_print(f"Found {len(rotlib.index)} rotamers for position {pos}.")
             rotlibs.append(rotlib)
         rotlib = pd.concat(rotlibs).reset_index(drop=True)
-        logging.info(f"Found {len(rotlib.index)} rotamers in total.")
-        print(f"Found {len(rotlib.index)} rotamers in total.")
+        rotlib = normalize_col(rotlib, 'log_prob', scale=True)
+        rotlib = normalize_col(rotlib, 'log_occurrence', scale=True)
+        rotlib = combine_normalized_scores(rotlib, 'rotamer_score', ['log_prob_normalized', 'log_occurrence_normalized'], [args.prob_weight, args.occurrence_weight], True, True)
+        rotlib = rotlib.sort_values('rotamer_score', ascending=False).reset_index(drop=True)
+        #print(rotlib)
+
+        log_and_print(f"Found {len(rotlib.index)} rotamers in total.")
         rotlibcsv = utils.create_output_dir_change_filename(f'{output_dir}rotamer_info', args.output_prefix + f'_rotamers_{args.theozyme_resnum}_combined.csv')
-        logging.info(f"Writing phi/psi combinations to {rotlibcsv}.")
-        print(f"Writing phi/psi combinations to {rotlibcsv}.")
+        log_and_print(f"Writing phi/psi combinations to {rotlibcsv}.")
         rotlib.to_csv(rotlibcsv)
 
         frag_dict = {}
@@ -1134,8 +1235,10 @@ def main(args):
                 df.loc[pos - 1, [column for column in rotlib.columns if column.startswith("chi") or column == "probability" or column == "AA"]] = [row[column] for column in rotlib.columns if column.startswith("chi") or column == "probability" or column == "AA"]
                 df['frag_num'] = index
                 df['rotamer_pos'] = pos
+                df['rotamer_score'] = row['rotamer_score']
+                df['combined_fragment_score'] = df['rotamer_score']
                 pos_frags.append(df)
-            print(f"Created {len(pos_frags)} fragments for position {pos}.")
+            log_and_print(f"Created {len(pos_frags)} fragments for position {pos}.")
             frag_dict[pos] = pd.concat(pos_frags)
 
     else:
@@ -1143,10 +1246,9 @@ def main(args):
         #################################### FRAGMENT FINDER ####################################
         
         
-
-        logging.info(f"Importing fragment library from {args.database_dir}/fraglib.pkl")
-        print(f"Importing fragment library from {args.database_dir}/fraglib.pkl")
-        fraglib = import_fragment_library(f'{database_dir}/fraglib.pkl')
+        bbfinder = False
+        log_and_print(f"Importing fragment library from {database_dir}/fraglib_energy.pkl")
+        fraglib = import_fragment_library(f'{database_dir}/fraglib_energy.pkl')
 
 
         rotamer_positions_list = []
@@ -1154,85 +1256,69 @@ def main(args):
 
         for residue_identity in residue_identities:
             #find rotamer library for given amino acid
-            logging.info(f"Importing backbone dependent rotamer library for residue {residue_identity} from {args.database_dir}")
-            print(f"Importing backbone dependent rotamer library for residue {residue_identity} from {args.database_dir}")
+            log_and_print(f"Importing backbone dependent rotamer library for residue {residue_identity} from {args.database_dir}")
             rotlib = return_residue_rotamer_library(database, residue_identity)
-
-            #filter rotamer library for most probable rotamers
-            logging.info(f"Identifying most probable rotamers for residue {residue_identity}")
-            print(f"Identifying most probable rotamers for residue {residue_identity}")
-            rotlib = identify_backbone_angles_suitable_for_rotamer(residue_identity, rotlib, f'{args.output_prefix}_{args.theozyme_resnum}_', f'{output_dir}rotamer_info', args.rot_sec_struct, args.phipsi_occurrence_cutoff, args.max_phi_psis, args.rotamer_diff_to_best, args.rotamer_chi_binsize, args.prob_cutoff)
-            logging.info(f"Found {len(rotlib.index)} phi/psi combinations.")
-            print(f"Found {len(rotlib.index)} phi/psi combinations.")
+            rotlib = normalize_col(rotlib, 'log_prob', scale=True)
+            rotlib = normalize_col(rotlib, 'log_occurrence', scale=True)
+            rotlib = combine_normalized_scores(rotlib, 'rotamer_score', ['log_prob_normalized', 'log_occurrence_normalized'], [args.prob_weight, args.occurrence_weight], True, True)
+            log_and_print(f"Identifying most probable rotamers for residue {residue_identity}")
+            rotlib = identify_backbone_angles_suitable_for_rotamer(residue_identity, rotlib, f'{args.output_prefix}_{args.theozyme_resnum}_', f'{output_dir}rotamer_info', args.rot_sec_struct, args.phipsi_occurrence_cutoff, int(args.max_phi_psis / len(residue_identities)), args.rotamer_diff_to_best, args.rotamer_chi_binsize, args.rotamer_phipsi_binsize, args.prob_cutoff)
+            log_and_print(f"Found {len(rotlib.index)} phi/psi/chi combinations.")
             rotlibs.append(rotlib)
 
-            #write filtered rotamer library to disk
-            rotlibcsv = utils.create_output_dir_change_filename(f'{output_dir}rotamer_info', args.output_prefix + f'_rotamers_{args.theozyme_resnum}_{residue_identity}.csv')
-            logging.info(f"Writing phi/psi combinations to {rotlibcsv}.")
-            print(f"Writing phi/psi combinations to {rotlibcsv}.")
-            rotlib.to_csv(rotlibcsv)
-
-            logging.info(f"Looking for positions with phi/psi angles fitting to picked combinations in fragment database for residue {residue_identity}...")
-            print(f"Looking for positions with phi/psi angles fitting to picked combinations in fragment database for residue {residue_identity}...")
-            rotamer_positions = identify_positions_for_rotamer_insertion(fraglib, rotlib.copy(), args.rot_sec_struct, args.phi_psi_bin, limit_frags_to_chi, limit_frags_to_res_id)
-            logging.info(f'Found {len(rotamer_positions.index)} positions for rotamer insertion for residue {residue_identity}.')
-            print(f'Found {len(rotamer_positions.index)} positions for rotamer insertion for residue {residue_identity}.')
-            rotamer_positions_list.append(rotamer_positions)
-
-        #if len(rotlibs) > 1:
-        rotlib = pd.concat(rotlibs).sort_values("probability", ascending=False).reset_index(drop=True)
+        rotlib = pd.concat(rotlibs).sort_values("rotamer_score", ascending=False).reset_index(drop=True)
+        rotlib = normalize_col(rotlib, 'log_prob', scale=True)
+        rotlib = normalize_col(rotlib, 'log_occurrence', scale=True)
+        rotlib = combine_normalized_scores(rotlib, 'rotamer_score', ['log_prob_normalized', 'log_occurrence_normalized'], [args.prob_weight, args.occurrence_weight], True, True)
+        rotlib = rotlib.sort_values('rotamer_score', ascending=False).reset_index(drop=True)
         rotlibcsv = utils.create_output_dir_change_filename(f'{output_dir}rotamer_info', args.output_prefix + f'_rotamers_{args.theozyme_resnum}_combined.csv')
-        logging.info(f"Writing phi/psi combinations to {rotlibcsv}.")
-        print(f"Writing phi/psi combinations to {rotlibcsv}.")
+        log_and_print(f"Writing phi/psi combinations to {rotlibcsv}.")
         rotlib.to_csv(rotlibcsv)
-        rotamer_positions = pd.concat(rotamer_positions_list)
 
-        logging.info(f"Extracting fragments from rotamer positions...")
-        print(f"Extracting fragments from rotamer positions...")
+        log_and_print(f"Identifying positions for rotamer insertion...")
+        rotamer_positions = identify_positions_for_rotamer_insertion(fraglib, rotlib, args.rot_sec_struct, limit_frags_to_chi, limit_frags_to_res_id, args.phi_psi_bin)
+        log_and_print(f"Found {len(rotamer_positions.index)} fitting positions.")
+
+        log_and_print(f"Extracting fragments from rotamer positions...")
         frag_dict = extract_fragments(rotamer_positions, fraglib, frag_pos_to_replace, args.fragsize)
         frag_num = int(sum([len(frag_dict[pos].index) for pos in frag_dict]) / args.fragsize)
-        logging.info(f'Found {frag_num} fragments.')
-        print(f'Found {frag_num} fragments.')
+        log_and_print(f'Found {frag_num} fragments.')
 
         #filter fragments
         for pos in frag_dict:
             frag_nums = int(len(frag_dict[pos].index) / args.fragsize)
-            logging.info(f'Found {frag_nums} fragments for position {pos}.')
-            print(f'Found {frag_nums} fragments for position {pos}.')
+            log_and_print(f'Found {frag_nums} fragments for position {pos}.')
             if frag_nums == 0:
+                frag_dict.pop(pos)
                 continue
             if sec_dict:
                 frag_dict[pos] = filter_frags_df_by_secondary_structure_content(frag_dict[pos], sec_dict)
-                logging.info(f"{int(len(frag_dict[pos]) / args.fragsize)} fragments passed secondary structure filtering with filter {args.frag_sec_struct_fraction} for position {pos}.")
-                print(f"{int(len(frag_dict[pos]) / args.fragsize)} fragments passed secondary structure filtering with filter {args.frag_sec_struct_fraction} for position {pos}.")
-            if args.frag_phipsi_max_res_score_cutoff and args.fragment_scoretype == "phi_psi_occurrence":
-                frag_dict[pos] = filter_frags_df_by_score(frag_dict[pos], args.frag_phipsi_max_res_score_cutoff, args.fragment_scoretype, "min_cutoff")
-                logging.info(f"{int(len(frag_dict[pos]) / args.fragsize)} fragments passed maximum residue {args.fragment_scoretype} score filtering with cutoff {args.frag_phipsi_max_res_score_cutoff} for position {pos}.")
-                print(f"{int(len(frag_dict[pos]) / args.fragsize)} fragments passed maximum residue {args.fragment_scoretype} score filtering with cutoff {args.frag_phipsi_max_res_score_cutoff} for position {pos}.")
-            if args.frag_phipsi_mean_score_cutoff and args.fragment_scoretype == "phi_psi_occurrence":
+                log_and_print(f"{int(len(frag_dict[pos]) / args.fragsize)} fragments passed secondary structure filtering with filter {args.frag_sec_struct_fraction} for position {pos}.")
+            if args.frag_phipsi_min_res_score_cutoff:
+                frag_dict[pos] = filter_frags_df_by_score(frag_dict[pos], args.frag_phipsi_min_res_score_cutoff, args.fragment_scoretype, "min_cutoff")
+                log_and_print(f"{int(len(frag_dict[pos]) / args.fragsize)} fragments passed minimum residue {args.fragment_scoretype} score filtering with cutoff {args.frag_phipsi_min_res_score_cutoff} for position {pos}.")
+            if args.frag_phipsi_mean_score_cutoff:
                 frag_dict[pos] = filter_frags_df_by_score(frag_dict[pos], args.frag_phipsi_mean_score_cutoff, args.fragment_scoretype, "mean_min_cutoff")
-                logging.info(f"{int(len(frag_dict[pos]) / args.fragsize)} fragments passed mean {args.fragment_scoretype} score filtering with cutoff {args.frag_phipsi_mean_score_cutoff} for position {pos}.")
-                print(f"{int(len(frag_dict[pos]) / args.fragsize)} fragments passed mean {args.fragment_scoretype} score filtering with cutoff {args.frag_phipsi_mean_score_cutoff} for position {pos}.")
-            if args.frag_rosetta_max_res_score_cutoff and args.fragment_scoretype == "rosetta":
-                frag_dict[pos] = filter_frags_df_by_score(frag_dict[pos], args.frag_phipsi_max_res_score_cutoff, "bb_score", "max_cutoff")
-                logging.info(f"{int(len(frag_dict[pos]) / args.fragsize)} fragments passed maximum residue {args.fragment_scoretype} score filtering with cutoff {args.frag_rosetta_max_res_score_cutoff} for position {pos}.")
-                print(f"{int(len(frag_dict[pos]) / args.fragsize)} fragments passed maximum residue {args.fragment_scoretype} score filtering with cutoff {args.frag_rosetta_max_res_score_cutoff} for position {pos}.")
-            if args.frag_rosetta_mean_score_cutoff and args.fragment_scoretype == "rosetta":
-                frag_dict[pos] = filter_frags_df_by_score(frag_dict[pos], args.frag_phipsi_mean_score_cutoff, "bb_score", "mean_max_cutoff")
-                logging.info(f"{int(len(frag_dict[pos]) / args.fragsize)} fragments passed mean {args.fragment_scoretype} score filtering with cutoff {args.frag_rosetta_mean_score_cutoff} for position {pos}.")
-                print(f"{int(len(frag_dict[pos]) / args.fragsize)} fragments passed mean {args.fragment_scoretype} score filtering with cutoff {args.frag_rosetta_mean_score_cutoff} for position {pos}.")
-
-            if not frag_dict[pos].empty:
-                logging.info(f"Sorting fragments by mean backbone score for position {pos}.")
-                print(f"Sorting fragments by mean backbone score for position {pos}.")
-                frag_dict[pos] = sort_frags_df_by_score(frag_dict[pos], "bb_score")
-            else:
+                log_and_print(f"{int(len(frag_dict[pos]) / args.fragsize)} fragments passed mean {args.fragment_scoretype} score filtering with cutoff {args.frag_phipsi_mean_score_cutoff} for position {pos}.")
+            if frag_dict[pos].empty:
                 frag_dict.pop(pos)
-                logging.info(f"Could not find fragments for position {pos}.")
-                print(f"Could not find fragments for position {pos}.")
+                log_and_print(f"Could not find fragments for position {pos}.")
 
         if len(frag_dict) == 0:
             raise RuntimeError('Could not find any fragments that fit criteria! Try adjusting filter values!')
+        
+        combined_list = []
+        combined = pd.concat([frag_dict[pos] for pos in frag_dict])
+        group_df = combined.groupby('frag_num', sort=False).mean(numeric_only=True)
+        group_df = normalize_col(group_df, 'occurrence_score', scale=True)['occurrence_score_normalized']
+        combined = combined.merge(group_df, left_on='frag_num', right_index=True)
+        combined = combine_normalized_scores(combined, 'combined_fragment_score', ['occurrence_score_normalized', 'rotamer_score'], [args.backbone_score_weight, args.rotamer_score_weight], True, True)
+        for pos, df in combined.groupby('rotamer_pos', sort=False):
+            log_and_print(f"Sorting fragments by combined fragment score for position {pos} with weights (backbone: {args.backbone_score_weight}, rotamer: {args.rotamer_score_weight}).")
+            frag_dict[pos] = sort_frags_df_by_score(df, "combined_fragment_score")
+        combined = combined.groupby('frag_num', sort=False).mean(numeric_only=True)
+        _ = plots.violinplot_multiple_cols(combined, cols=['combined_fragment_score', 'occurrence_score_normalized', 'rotamer_score'], titles=['fragment score', 'backbone score', 'rotamer score'], y_labels=['AU', 'AU', 'AU'], dims=[(0, 1.1), (0, 1.1), (0, 1.1)], out_path=utils.create_output_dir_change_filename(f"{args.output_dir}/fragment_info", f"{args.output_prefix}_{args.theozyme_resnum}_pre_clash_filter.png"))
+        del combined
         
     #################################### CREATE FRAGS, ATTACH ROTAMERS, FILTER ####################################
 
@@ -1244,8 +1330,7 @@ def main(args):
 
     for pos in frag_dict:
         num_channel_clash, num_bb_clash, num_sc_clash, rmsd_fails = 0, 0, 0, 0
-        logging.info(f'Creating fragments, attaching rotamer, superpositioning with theozyme residue, calculating rmsd to all accepted fragments with cutoff {args.rmsd_cutoff} A for position {pos}.')
-        print(f'Creating fragments, attaching rotamer, superpositioning with theozyme residue, calculating rmsd to all accepted fragments with cutoff {args.rmsd_cutoff} A for position {pos}.')
+        log_and_print(f'Creating fragments, attaching rotamer, superpositioning with theozyme residue, calculating rmsd to all accepted fragments with cutoff {args.rmsd_cutoff} A for position {pos}.')
         picked_frags = []
         frag_dfs = []
         #calculate maximum number of fragments per position, add missing fragments from previous position to maximum
@@ -1275,34 +1360,38 @@ def main(args):
                         rot_frag_df['rotated degrees'] = deg
                         rot_frag = rotate_histidine_fragment(rot_frag, deg, theozyme_residue, args.his_central_atom, ligand)
                         picked_frags, frag_dfs, num_channel_clash, num_bb_clash, num_sc_clash, rmsd_fails = check_fragment(rot_frag, picked_frags, rot_frag_df, frag_dfs, ligand, channel, vdw_radii, pos, args.covalent_bond, args.rmsd_cutoff, args.backbone_ligand_clash_detection_vdw_multiplier, args.rotamer_ligand_clash_detection_vdw_multiplier, args.channel_fragment_clash_detection_vdw_multiplier, num_channel_clash, num_bb_clash, num_sc_clash, rmsd_fails)
-
+                if rotate_phenylalanines == True and theozyme_residue.get_resname() == "PHE":
+                    for deg in range(args.rotate_phenylalanines_deg, 360, args.rotate_phenylalanines_deg):
+                        if len(picked_frags) >= max_frags:
+                            break
+                        rot_frag = copy.deepcopy(frag)
+                        rot_frag_df = frag_df.copy()
+                        rot_frag_df['rotated degrees'] = deg
+                        rot_frag = rotate_phenylalanine_fragment(rot_frag, deg, theozyme_residue)
+                        picked_frags, frag_dfs, num_channel_clash, num_bb_clash, num_sc_clash, rmsd_fails = check_fragment(rot_frag, picked_frags, rot_frag_df, frag_dfs, ligand, channel, vdw_radii, pos, args.covalent_bond, args.rmsd_cutoff, args.backbone_ligand_clash_detection_vdw_multiplier, args.rotamer_ligand_clash_detection_vdw_multiplier, args.channel_fragment_clash_detection_vdw_multiplier, num_channel_clash, num_bb_clash, num_sc_clash, rmsd_fails)
+      
 
 
             else:
                 break
         
-        logging.info(f"Discarded {num_channel_clash} fragments that show clashes between backbone and channel placeholder with VdW multiplier {args.channel_fragment_clash_detection_vdw_multiplier}")
-        print(f"Discarded {num_channel_clash} fragments that show clashes between backbone and channel placeholder with VdW multiplier {args.channel_fragment_clash_detection_vdw_multiplier}")
-        logging.info(f"Discarded {num_bb_clash} fragments that show clashes between backbone and ligand with VdW multiplier {args.backbone_ligand_clash_detection_vdw_multiplier}")
-        print(f"Discarded {num_bb_clash} fragments that show clashes between backbone and ligand with VdW multiplier {args.backbone_ligand_clash_detection_vdw_multiplier}")
-        logging.info(f"Discarded {num_sc_clash} fragments that show clashes between sidechain and ligand with VdW multiplier {args.rotamer_ligand_clash_detection_vdw_multiplier}")
-        print(f"Discarded {num_sc_clash} fragments that show clashes between sidechain and ligand with VdW multiplier {args.rotamer_ligand_clash_detection_vdw_multiplier}")
-        logging.info(f"Discarded {rmsd_fails} fragments that did not pass RMSD cutoff of {args.rmsd_cutoff} to all other picked fragments")
-        print(f"Discarded {rmsd_fails} fragments that did not pass RMSD cutoff of {args.rmsd_cutoff} to all other picked fragments")
+        log_and_print(f"Discarded {num_channel_clash} fragments that show clashes between backbone and channel placeholder with VdW multiplier {args.channel_fragment_clash_detection_vdw_multiplier}")
+        log_and_print(f"Discarded {num_bb_clash} fragments that show clashes between backbone and ligand with VdW multiplier {args.backbone_ligand_clash_detection_vdw_multiplier}")
+        log_and_print(f"Discarded {num_sc_clash} fragments that show clashes between sidechain and ligand with VdW multiplier {args.rotamer_ligand_clash_detection_vdw_multiplier}")
+        log_and_print(f"Discarded {rmsd_fails} fragments that did not pass RMSD cutoff of {args.rmsd_cutoff} to all other picked fragments")
 
 
-        logging.info(f"Found {len(picked_frags)} fragments for position {pos} of a maximum of {max_frags}.")
-        print(f"Found {len(picked_frags)} fragments for position {pos} of a maximum of {max_frags}.")
+        log_and_print(f"Found {len(picked_frags)} fragments for position {pos} of a maximum of {max_frags}.")
         residual_to_max = max_frags - len(picked_frags)
         for frag, df in zip(picked_frags, frag_dfs):
             
             rot = identify_rotamer_position_by_probability(df)
             covalent_bonds = args.covalent_bond
             if covalent_bonds and args.add_equivalent_func_groups in ["True", "1", "true", "yes", "Yes", "TRUE"] and theozyme_residue.get_resname() != rot['AA']:
-                covalent_bonds = ",".join([exchange_covalent(covalent_bond) for covalent_bond in covalent_bonds.split(";")])
+                covalent_bonds = ",".join([exchange_covalent(covalent_bond) for covalent_bond in covalent_bonds.split(",")])
             if covalent_bonds and rot['flipped'] == True:
-                covalent_bonds = ",".join([flip_covalent(covalent_bond, rot["AA"]) for covalent_bond in covalent_bonds.split(";")])
-            row = pd.Series({'model_num': frag_num, 'rotamer_pos': pos, 'AAs': df['AA'].to_list(), 'bb_score': df['bb_score'].to_list() if 'bb_score' in df.columns else None, 'phi_psi_occurrence': df['phi_psi_occurrence'].to_list() if 'phi_psi_occurrence' in df.columns else None, 'secondary_structure': df['ss'].to_list() if 'ss' in df.columns else None, 'rotamer_probability': float(df.dropna(subset = ['probability']).squeeze()['probability']), 'covalent_bond': covalent_bonds})
+                covalent_bonds = ",".join([flip_covalent(covalent_bond, rot["AA"]) for covalent_bond in covalent_bonds.split(",")])
+            row = pd.Series({'model_num': frag_num, 'rotamer_pos': pos, 'AAs': df['AA'].to_list(), 'backbone_score': df['occurrence_score_normalized'].mean() if 'occurrence_score_normalized' in df.columns else 0, 'fragment_score': df['combined_fragment_score'].mean() if "combined_fragment_score" in df.columns else 0, 'phi_psi_occurrence': df['phi_psi_occurrence'].to_list() if 'phi_psi_occurrence' in df.columns else None, 'secondary_structure': df['ss'].to_list() if 'ss' in df.columns else None, 'rotamer_probability': float(df.dropna(subset = ['probability']).squeeze()['probability']), 'covalent_bond': covalent_bonds, 'rotamer_score': df['rotamer_score'].mean()})
             model = Model.Model(frag_num)
             model.add(frag)
             if ligand:
@@ -1318,21 +1407,18 @@ def main(args):
             frag_num += 1
         del(picked_frags)
 
-    logging.info(f'Found {len(frags_info)} fragments that passed all filters.')
-    print(f'Found {len(frags_info)} fragments that passed all filters.')
+    log_and_print(f'Found {len(frags_info)} fragments that passed all filters.')
 
     #write fragment info to disk
     frags_table = pd.concat(frags_table)
     fragscsv = utils.create_output_dir_change_filename(f'{output_dir}fragment_info', args.output_prefix + f'_fragments_{args.theozyme_resnum}.csv')
-    logging.info(f'Writing fragment details to {fragscsv}.')
-    print(f'Writing fragment details to {fragscsv}.')
+    log_and_print(f'Writing fragment details to {fragscsv}.')
     frags_table.to_csv(fragscsv)
 
 
     #write multimodel fragment pdb to disk
     filename_pdb = utils.create_output_dir_change_filename(output_dir, args.output_prefix + f'_{args.theozyme_resnum}.pdb')
-    logging.info(f'Writing multimodel fragment pdb to {filename_pdb}.')
-    print(f'Writing multimodel fragment pdb to {filename_pdb}.')
+    log_and_print(f'Writing multimodel fragment pdb to {filename_pdb}.')
     utils.write_multimodel_structure_to_pdb(fragments, filename_pdb)
 
     #write output json to disk
@@ -1340,11 +1426,13 @@ def main(args):
     frags_info['poses'] = os.path.abspath(filename_pdb)
     frags_info['poses_description'] = f'{args.output_prefix}_{args.theozyme_resnum}'
     filename_json = utils.create_output_dir_change_filename(output_dir, args.output_prefix + f'_{args.theozyme_resnum}.json')
-    logging.info(f'Writing output json to {filename_json}.')
-    print(f'Writing output json to {filename_json}.')
+    log_and_print(f'Writing output json to {filename_json}.')
     frags_info.to_json(filename_json)
-    print(f"Done in {time.time()} seconds!")
-    logging.info(f"Done in {round(time.time() - start, 0)} seconds!")
+
+    if bbfinder == False:
+        combined = frags_table.groupby('frag_num', sort=False).mean(numeric_only=True)
+        _ = plots.violinplot_multiple_cols(combined, cols=['combined_fragment_score', 'occurrence_score_normalized', 'rotamer_score'], titles=['fragment score', 'backbone score', 'rotamer score'], y_labels=['AU', 'AU', 'AU'], dims=[(0, 1.1), (0, 1.1), (0, 1.1)], out_path=utils.create_output_dir_change_filename(f"{args.output_dir}/fragment_info", f"{args.output_prefix}_{args.theozyme_resnum}_post_filter.png"))
+    log_and_print(f"Done in {round(time.time() - start, 1)} seconds!")
 
 
 if __name__ == "__main__":
@@ -1359,40 +1447,45 @@ if __name__ == "__main__":
     argparser.add_argument("--output_dir", type=str, required=True, help="Output directory")
     argparser.add_argument("--output_prefix", type=str, required=True, help="Prefix for all output files")
     argparser.add_argument("--ligand_chain", type=str, default=None, help="Chain name of your ligand chain. Set None if no ligand is present")
-    argparser.add_argument("--fragment_pdb", type=str, default=None, help="Path to backbone fragment pdb. If set, only this fragment (with different rotamers) will be returned.")
+    argparser.add_argument("--fragment_pdb", type=str, default=None, help="Path to backbone fragment pdb. If set, only this fragment (with different rotamers) will be returned instead of searching the fragment library.")
 
     # stuff you might want to adjust
     argparser.add_argument("--frag_pos_to_replace", type=int, default=[2,6], nargs='+', help="Position in fragment the rotamer should be inserted, can either be int or a list containing first and last position (e.g. 2,6 if rotamer should be inserted at every position from 2 to 6). Recommended not to include N- and C-terminus!")
     argparser.add_argument("--fragsize", type=int, default=7, help="Size of output fragments.")
     argparser.add_argument("--rot_sec_struct", type=str, default=None, help="Limit fragments to secondary structure at rotamer position. Provide string of one-letter code of dssp secondary structure elements (B, E, G, H, I, T, S, -), e.g. 'HE' if rotamer should be in helices or beta strands.")
     argparser.add_argument("--frag_sec_struct_fraction", type=str, default=None, help="Limit to fragments containing at least fraction of residues with the provided secondary structure. If fragment should have at least 50 percent helical residues OR 60 percent beta-sheet, pass 'H:0.5,E:0.6'")
-    argparser.add_argument("--max_frags", type=int, default=200, help="Maximum number of frags that should be returned. Recommended value is <max_phi_psis> * len(frag_pos_to_replace).")
+    argparser.add_argument("--max_frags", type=int, default=100, help="Maximum number of frags that should be returned. Recommended value is <max_phi_psis> * len(frag_pos_to_replace).")
     argparser.add_argument("--rmsd_cutoff", type=float, default=2.0, help="Set minimum RMSD of output fragments. Increase to get more diverse fragments, but high values might lead to very long runtime or few fragments!")
-    argparser.add_argument("--frag_phipsi_mean_score_cutoff", type=float, default=2.0, help="Maximum mean backbone score of fragments")
-    argparser.add_argument("--frag_phipsi_max_res_score_cutoff", type=float, default=0.5, help="Maximum backbone score of a fragment residue")
-    argparser.add_argument("--frag_rosetta_mean_score_cutoff", type=float, default=0.1, help="Maximum mean backbone score of fragments")
-    argparser.add_argument("--frag_rosetta_max_res_score_cutoff", type=float, default=0.5, help="Maximum backbone score of a fragment residue")
-    argparser.add_argument("--phipsi_occurrence_cutoff", type=float, default=1.0, help="Limit how common the phi/psi combination of a certain rotamer has to be. Value is in percent")
+    argparser.add_argument("--frag_phipsi_mean_score_cutoff", type=float, default=None, help="Minimum mean phi/psi occurrence score of fragments")
+    argparser.add_argument("--frag_phipsi_min_res_score_cutoff", type=float, default=None, help="Minimum phi/psi occurrence score of a fragment residue")
+    argparser.add_argument("--phipsi_occurrence_cutoff", type=float, default=0.8, help="Limit how common the phi/psi combination of a certain rotamer has to be. Value is in percent")
     argparser.add_argument("--covalent_bond", type=str, default=None, help="Add covalent bond(s) between rotamer and ligand in the form 'RotAtomA:LigAtomA,RotAtomB:LigAtomB'. Atom names should follow PDB numbering schemes, e.g. 'NZ:C3' for a covalent bond between a Lysine nitrogen and the third carbon atom of the ligand.")
     argparser.add_argument("--channel_chain", type=str, default=None, help="If adding a channel placeholder manually, provide the chain name here (important for clash detection!)")
     argparser.add_argument("--prob_cutoff", type=float, default=0.10, help="Do not return any phi/psi combinations with chi angle probabilities below this value")
     argparser.add_argument("--add_equivalent_func_groups", type=str, default="True", help="use ASP/GLU, GLN/ASN and VAL/ILE interchangeably")
-    argparser.add_argument("--fragment_scoretype", type=str, default="phi_psi_occurrence", help="score type used for ranking fragments. can be either 'rosetta' (sum of omega, rama_prepro, hbond_sr_bb, p_aa_pp Rosetta scoreterms with ref15 weights) or 'phi_psi_occurrence' (how common a set of phi/psi angles is relative to all other phi/psi combinations * - 1).")
+    argparser.add_argument("--fragment_scoretype", type=str, default="occurrence_score", help="score type used for ranking fragments. can be either 'rosetta' (sum of omega, rama_prepro, hbond_sr_bb, p_aa_pp Rosetta scoreterms with ref15 weights) or 'phi_psi_occurrence' (how common a set of phi/psi angles is relative to all other phi/psi combinations * - 1).")
 
     # stuff you probably don't want to touch
-    argparser.add_argument("--rotamer_chi_binsize", type=float, default=15, help="Filter for diversifying found rotamers. Lower numbers mean more similar rotamers will be found")
+    argparser.add_argument("--rotamer_chi_binsize", type=float, default=None, help="Filter for diversifying found rotamers. Lower numbers mean more similar rotamers will be found. Similar rotamers will still be accepted if their backbone angles are different. Recommended value: 15")
+    argparser.add_argument("--rotamer_phipsi_binsize", type=float, default=None, help="Filter for diversifying found rotamers. Lower numbers mean similar rotamers from more similar backbone angles will be accepted. Recommended value: 50")
     argparser.add_argument("--limit_frags_to_res_id", type=str, default="True", help="Only pick fragments that contain the rotamer residue identity at the specified position with given phi/psi angle combination")
     argparser.add_argument("--limit_frags_to_chi", type=str, default="True", help="Only pick fragments that contain the rotamer with chi angles within the bin range of the target chi angle")
-    argparser.add_argument("--phi_psi_bin", type=float, default=10, help="Binsize used to identify if fragment fits to phi/psi combination")
-    argparser.add_argument("--max_phi_psis", type=int, default=12, help="maximum number of phi/psi combination that should be returned. Can be increased if not enough fragments are found downstream (e.g. because secondary structure filter was used, and there are not enough phi/psi combinations in the output that fit to the specified secondary structure.")
-    argparser.add_argument("--rotamer_diff_to_best", type=float, default=1.0, help="Accept rotamers that have a probability not lower than this percentage of the most probable rotamer. 1 means all rotamers will be accepted.")
-    argparser.add_argument("--rotate_histidines", type=str, default="True", help="Rotate the orientation of histidine residues in <rotate_his_deg> steps to generate more fragment orientations")
-    argparser.add_argument("--his_central_atom", type=str, default="auto", help="Only important if rotamer is HIS and flip_histidines is True, sets the name of the atom that should not be flipped.If auto, the histidine nitrogen closest to the ligand is the coordinating atom. Can be manually set to NE2 or ND1")
-    argparser.add_argument("--flip_symmetric", type=str, default="True", help="Flip tip symmetric residues.")
+    argparser.add_argument("--phi_psi_bin", type=float, default=8, help="Binsize used to identify if fragment fits to phi/psi combination. Should not be above 10!")
+    argparser.add_argument("--max_phi_psis", type=int, default=15, help="maximum number of phi/psi combination that should be returned. Can be increased if not enough fragments are found downstream (e.g. because secondary structure filter was used, and there are not enough phi/psi combinations in the output that fit to the specified secondary structure.")
+    argparser.add_argument("--rotamer_diff_to_best", type=float, default=0.5, help="Accept rotamers that have a probability not lower than this percentage of the most probable rotamer. 1 means all rotamers will be accepted.")
+    argparser.add_argument("--his_central_atom", type=str, default="auto", help="Only important if rotamer is HIS and <rotate_histidines> is True, sets the name of the atom that should not be flipped. If auto, the histidine nitrogen closest to the ligand is the coordinating atom. Can be manually set to NE2 or ND1")
+    argparser.add_argument("--flip_symmetric", type=str, default="True", help="Flip tip symmetric residues (ARG, ASP, GLU, LEU, PHE, TYR, VAL).")
     argparser.add_argument("--rotamer_ligand_clash_detection_vdw_multiplier", type=float, default=0.75, help="Multiplier for VanderWaals radii for clash detection between rotamer and ligand. Clash is detected if a distance between atoms < (VdW_radius_atom1 + VdW_radius_atom2)*multiplier.")
     argparser.add_argument("--backbone_ligand_clash_detection_vdw_multiplier", type=float, default=1.0, help="Multiplier for VanderWaals radii for clash detection between fragment backbone and ligand. Clash is detected if a distance between atoms < (VdW_radius_atom1 + VdW_radius_atom2)*multiplier.")
     argparser.add_argument("--channel_fragment_clash_detection_vdw_multiplier", type=float, default=1.0, help="Multiplier for VanderWaals radii for clash detection between fragment backbone and channel placeholder. Clash is detected if a distance between atoms < (VdW_radius_atom1 + VdW_radius_atom2)*multiplier.")
-    argparser.add_argument("--rotate_histidines_deg", type=int, default=15, help="Rotate fragments with histidines as catalytic residues around central atom around 360 degrees in <rotate_his_deg> steps.")
+    argparser.add_argument("--rotate_histidines", type=str, default="True", help="Rotate the orientation of histidine residues in <rotate_his_deg> steps to generate more fragment orientations")
+    argparser.add_argument("--rotate_histidines_deg", type=float, default=30, help="Rotate fragments with histidines as catalytic residues around central atom around 360 degrees in <rotate_histidines_deg> steps.")
+    argparser.add_argument("--rotate_phenylalanines", type=str, default="True", help="Rotate the orientation of phenylalanine residues in <rotate_phenylalanines_deg> steps to generate more fragment orientations")
+    argparser.add_argument("--rotate_phenylalanines_deg", type=float, default=60, help="Rotate fragments with phenylalanines as catalytic residues around center in <rotate_phenylalanines_deg> steps.")
+    argparser.add_argument("--prob_weight", type=float, default=3, help="Weight for rotamer probability importance when picking rotamers.")
+    argparser.add_argument("--occurrence_weight", type=float, default=1, help="Weight for phi/psi-occurrence importance when picking rotamers.")
+    argparser.add_argument("--backbone_score_weight", type=float, default=1, help="Weight for importance of fragment backbone score (boltzman score of backbone angle probabilities) when sorting fragments.")
+    argparser.add_argument("--rotamer_score_weight", type=float, default=1, help="Weight for importance of rotamer score (combined score of probability and occurrence) when sorting fragments.")
 
 
     args = argparser.parse_args()

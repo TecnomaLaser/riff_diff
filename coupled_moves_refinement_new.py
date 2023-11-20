@@ -1012,10 +1012,13 @@ def main(args):
         lig_poses = coupled_moves.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix="docking_lig_poses")
         docking_options = f"-parser:protocol {args.docking_protocol}"
         docking_pose_opts = [f"-parser:script_vars native={pose} ligchain={args.ligand_chain}" for pose in coupled_moves.poses_df["poses"].to_list()]
-        docked_poses = rosetta_scripts_and_mean(coupled_moves, prefix="final_dock", n=15, options=docking_options, pose_options=docking_pose_opts, filter_scoreterm="final_dock_lig_rms", scoreterms=stats_scoreterms, min_scoreterms=stats_scoreterms, std_scoreterms=stats_scoreterms)
+        docked_poses = rosetta_scripts_and_mean(coupled_moves, prefix="final_dock", n=50, options=docking_options, pose_options=docking_pose_opts, filter_scoreterm="final_dock_lig_rms", scoreterms=stats_scoreterms, min_scoreterms=stats_scoreterms, std_scoreterms=stats_scoreterms)
 
     ################# Reindex poses before output #################################
     coupled_moves.reindex_poses(out_dir="cm_reindexed", remove_layers=2, keep_layers=True)
+
+    # if specified, calculate protparams:
+    if args.calc_protparams.lower() == "true": coupled_moves.calc_protparams(prefix="cm")
 
     #create output directory
     resultsdir = os.path.join(args.output_dir, 'results/')
@@ -1036,6 +1039,8 @@ def main(args):
     dims = [(0,100), (0,5), (0,5), (0,1), (0,1)]
     _ = plots.violinplot_multiple_cols(coupled_moves.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{args.output_dir}/plots/post_cm.png")
 
+    # store sequences
+    coupled_moves.store_sequences(prefix="final_sequence")
     coupled_moves.poses_df.to_json(coupled_moves.scorefile)
 
     logging.info("Done!")
@@ -1056,6 +1061,7 @@ if __name__ == "__main__":
     argparser.add_argument("--use_reduced_motif", type=str, default=True, help="Only fix residues +- 1 around catalytic residues during trajectory.")
     argparser.add_argument("--mutations_csv", type=str, default=None, help="Read in information about mutations (e.g. to keep channel open). Format should be 'resnumA:resids,resnumB:resids' etc. E.g. '35:AGS' only allows Ala, Gly or Ser at position 35. Residue IDs can be prohibited by using 35:-KR --> excludes Lys and Arg at pos 35. A small 'x' indicates this pose should not be passed on for the cm-pipeline. Mutations should be separated by a comma and put into quotation marks")
     argparser.add_argument("--omit_AAs", type=str, default="C", help="Prevent these residues from being built during mpnn/coupled moves. Use 1-letter code: 'CH' if no cysteines and histidines should be incorporated.")
+    argparser.add_argument("--calc_protparams", type=str, default="False", help="Calculate Protparams for final output structures?")
 
     #coupled moves options
     argparser.add_argument("--cm_protocol", type=str, default='/home/mabr3112/riff_diff/rosetta/coupled_moves.xml', help="path to xmlfile that should be used for coupled moves")
