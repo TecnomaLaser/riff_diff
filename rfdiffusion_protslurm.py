@@ -1,4 +1,4 @@
-#!/home/mabr3112/anaconda3/envs/protslurm/python
+#!/home/mabr3112/anaconda3/envs/protslurm/bin/python
 '''
 Script to run RFdiffusion active-site model on artificial motif libraries.
 '''
