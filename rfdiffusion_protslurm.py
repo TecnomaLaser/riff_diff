@@ -4,6 +4,7 @@ Script to run RFdiffusion active-site model on artificial motif libraries.
 '''
 import logging
 import os
+import re
 
 # dependency
 import pandas as pd
@@ -97,6 +98,33 @@ def update_and_copy_reference_frags(input_df: pd.DataFrame, ref_col:str, desc_co
     # renumber
     return [renumber_pdb_by_residue_mapping(ref_frag, res_mapping, out_pdb_path=pdb_output, keep_chain=keep_ligand_chain) for ref_frag, res_mapping, pdb_output in zip(input_df[ref_col].to_list(), list_of_mappings, output_pdb_names_list)]
 
+def active_site_pose_opts(input_opt: str, motif: dict) -> str:
+    '''Converts rfdiffusion_pose_opts string from default model to pose_opts string for active_site model (removes inpaint_seq and stuff.)'''
+    def re_split_rfdiffusion_opts(command: str) -> list:
+        if command is None:
+            return []
+        return re.split(r"\s+(?=(?:[^']*'[^']*')*[^']*$)", command)
+    # split args in rfdiffusion string and remove inpaint_seq
+    opts_l = [x for x in re_split_rfdiffusion_opts(input_opt) if "inpaint_seq" not in x]
+    contig = opts_l[0]
+
+    # change linker minimum lengths:
+    contig = replace_number_with_10(contig)
+
+    # exchange fixed residues in contig:
+    for chain, res in motif.items():
+        contig = contig.replace(f"{chain}1-7", f"{chain}{res[0]}-{res[0]}")
+
+    # remerge contig into opts_l and return concatenated opts:
+    opts_l[0] = contig
+    return " ".join(opts_l)
+
+def replace_number_with_10(input_string):
+    '''Replaces minimum linker length in rfdiffusion contig (from x-50 to 10-50)'''
+    # This regex matches any sequence of digits followed by '-50'
+    pattern = r'\d+-50'
+    # Replace found patterns with '10-50'
+    return re.sub(pattern, '10-50', input_string)
 
 def main(args):
     '''executes everyting (duh)'''
@@ -123,8 +151,8 @@ def main(args):
 
     # change flanker lengths of rfdiffusion motif contigs
     if args.flanking:
-        backbones.df["rfdiffusion_pose_opts"] = [adjust_flanking(rfdiffusion_pose_opts_str, "split", args.total_flanker_length) for rfdiffusion_pose_opts_str in backbones.df["rfdiffusion_pose_opts"].to_list()]
-    elif args.total_flanker_length:
+        backbones.df["rfdiffusion_pose_opts"] = [adjust_flanking(rfdiffusion_pose_opts_str, "split", args.flanker_length) for rfdiffusion_pose_opts_str in backbones.df["rfdiffusion_pose_opts"].to_list()]
+    elif args.flanker_length:
         raise ValueError(f"Argument 'total_flanker_length' was given, but not 'flanking'! Both args have to be provided.")
 
     # adjust linkers
@@ -141,6 +169,11 @@ def main(args):
         if len(args.recenter.split(";")) != 3:
             raise ValueError(f"--recenter needs to be semicolon separated coordinates. E.g. --recenter=31.123;-12.123;-0.342")
         recenter = f",recenter_xyz:{args.recenter}"
+
+    # change pose_opts according to model being used:
+    if args.model == "active_site":
+        logging.info("Using Active Site Model. Changing contig strings from pose_options.")
+        backbones.df["rfdiffusion_pose_opts"] = [active_site_pose_opts(row["rfdiffusion_pose_opts"], row["template_fixedres"]) for row in backbones]
 
     # run diffusion
     diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale=5 inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:substrate_contacts,weight:0\\',\\'type:custom_ROG,weight:{args.rog_weight}\\',\\'type:custom_recenter,distance:{args.decentralize_distance}{recenter}\\'] potentials.guide_decay=quadratic"
@@ -284,9 +317,10 @@ if __name__ == "__main__":
     argparser.add_argument("--num_rfdiffusions", type=int, default=10, help="Number of backbones to generate per input path.")
     argparser.add_argument("--decentralize_distance", type=float, default=20, help="Default Distance to decentralize from diffusion center. Default direction of decentralization is away from the substrate.")
     argparser.add_argument("--rog_weight", type=float, default=16, help="Strength of ROG weight of auxiliary potential. Adjust to desired ROG. be aware that it might decrease diffusion performance.")
-    argparser.add_argument("--flanker_length", type=int, default=30, help="Set Length of Flanking regions")
+    argparser.add_argument("--flanker_length", type=int, default=30, help="Set Length of Flanking regions. For active_site model: 30 (recommended at least).")
     argparser.add_argument("--overwrite_linker_lengths", type=str, default="50,200", help="linker length, total length. How long should the linkers be, how long should the protein be in total?")
     argparser.add_argument("--rfdiffusion_timesteps", type=int, default=50, help="Specify how many diffusion timesteps to run. 50 recommended. don't change")
+    argparser.add_argument("--model", type=str, default="default", help="{default,active_site} Choose which model to use for RFdiffusion (active site or regular model).")
 
     # ligandmpnn optionals
     argparser.add_argument("--num_mpnn_sequences", type=int, default=8, help="How many LigandMPNN sequences do you want to design after RFdiffusion?")
