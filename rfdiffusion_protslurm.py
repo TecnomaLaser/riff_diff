@@ -137,13 +137,14 @@ def main(args):
 
     # format path_df to be a DF readable by Poses class
     input_df = pd.read_json(f"{args.input_dir}/selected_paths.json", typ="frame")
-    input_df.reset_index().rename(columns={"index": "poses_description"})
+    input_df = input_df.reset_index().rename(columns={"index": "poses_description"})
     input_df["poses"] = f"{args.input_dir}/pdb_in/" + input_df["poses_description"] + ".pdb"
     input_df["input_poses"] = input_df["poses"]
     input_df.to_json((path_df := f"{args.output_dir}/paths.poses.json"))
 
     # load poses
     backbones = protslurm.poses.load_poses(path_df)
+    backbones.set_work_dir(args.output_dir)
 
     # setup jobstarters
     gpu_jobstarter = SbatchArrayJobstarter(max_cores=args.max_gpus, gpus=1)
@@ -169,6 +170,8 @@ def main(args):
         if len(args.recenter.split(";")) != 3:
             raise ValueError(f"--recenter needs to be semicolon separated coordinates. E.g. --recenter=31.123;-12.123;-0.342")
         recenter = f",recenter_xyz:{args.recenter}"
+    else:
+        recenter = None
 
     # change pose_opts according to model being used:
     if args.model == "active_site":
@@ -181,7 +184,7 @@ def main(args):
     backbones = rfdiffusion.run(
         poses=backbones,
         prefix="rfdiffusion",
-        num_diffusions=args.num_rfdiffusion,
+        num_diffusions=args.num_rfdiffusions,
         options=diffusion_options,
         pose_options=backbones.df["rfdiffusion_pose_opts"].to_list(),
         update_motifs=motif_cols
@@ -315,8 +318,10 @@ if __name__ == "__main__":
 
     # rfdiffusion optionals
     argparser.add_argument("--num_rfdiffusions", type=int, default=10, help="Number of backbones to generate per input path.")
+    argparser.add_argument("--recenter", type=str, default=None, help="Point (xyz) in input pdb towards the diffusion should be recentered. Set strength of recentering with --decentralize_distance. example: --recenter=-13.123;34.84;2.3209")
     argparser.add_argument("--decentralize_distance", type=float, default=20, help="Default Distance to decentralize from diffusion center. Default direction of decentralization is away from the substrate.")
     argparser.add_argument("--rog_weight", type=float, default=16, help="Strength of ROG weight of auxiliary potential. Adjust to desired ROG. be aware that it might decrease diffusion performance.")
+    argparser.add_argument("--flanking", type=str, default="split", help="How flanking should be set. Always leave on split. nterm or cterm also valid options.")
     argparser.add_argument("--flanker_length", type=int, default=30, help="Set Length of Flanking regions. For active_site model: 30 (recommended at least).")
     argparser.add_argument("--overwrite_linker_lengths", type=str, default="50,200", help="linker length, total length. How long should the linkers be, how long should the protein be in total?")
     argparser.add_argument("--rfdiffusion_timesteps", type=int, default=50, help="Specify how many diffusion timesteps to run. 50 recommended. don't change")
