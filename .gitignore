@@ -25,3 +25,5 @@ model_evaluation.ipynb
 .gitignore
 model_evaluation_figures.ipynb
 models/__pycache__/riff_diff_models.cpython-39.pyc
+esm_perplexity_dev.ipynb
+linear_projection_model.pt
