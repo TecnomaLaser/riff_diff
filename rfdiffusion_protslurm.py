@@ -227,7 +227,8 @@ def main(args):
     catres_ca_rmsd = MotifRMSD(ref_col = "updated_reference_frags_location", target_motif = "fixed_residues", ref_motif = "fixed_residues")
 
     # calculate RMSD
-    catres_ca_rmsd.calc_rmsd(poses = backbones, prefix = "rfdiffusion_catres_rmsd")
+    #not possible, because RFdiffusion output does not yet have sidechains... (really???)
+    #catres_ca_rmsd.calc_rmsd(poses = backbones, prefix = "rfdiffusion_catres_rmsd")
 
     # add back the ligand:
     chain_adder = protslurm.tools.protein_edits.ChainAdder(jobstarter = cpu_jobstarter)
@@ -240,12 +241,10 @@ def main(args):
 
     # run LigandMPNN
     ligand_mpnn = protslurm.tools.ligandmpnn.LigandMPNN(jobstarter = gpu_jobstarter)
-    #ligand_mpnn_opts = ""
     backbones = ligand_mpnn.run(
         poses = backbones,
         prefix = "postdiffusion_ligandmpnn",
         nseq = args.num_mpnn_sequences,
-        #options = ligand_mpnn_opts,
         fixed_res_col = "fixed_residues"
     )
 
