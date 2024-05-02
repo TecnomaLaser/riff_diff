@@ -25,7 +25,7 @@ import protslurm.tools.rosetta
 from protslurm.utils.biopython_tools import renumber_pdb_by_residue_mapping
 
 # local
-import utils.plotting as plots
+import protslurm.utils.plotting as plots
 
 if __file__.startswith("/home/mabr3112"):
     matplotlib.use('Agg')
@@ -171,7 +171,7 @@ def main(args):
             raise ValueError(f"--recenter needs to be semicolon separated coordinates. E.g. --recenter=31.123;-12.123;-0.342")
         recenter = f",recenter_xyz:{args.recenter}"
     else:
-        recenter = None
+        recenter = ""
 
     # change pose_opts according to model being used:
     if args.model == "active_site":
