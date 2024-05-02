@@ -150,9 +150,6 @@ def main(args):
     backbones = protslurm.poses.load_poses(path_df)
     backbones.set_work_dir(args.output_dir)
 
-    # load channel_contig
-    backbones.df["rfdiffusion_pose_opts"] = backbones.df["rfdiffusion_pose_opts"].str.replace("contigmap.contigs=[", f"contigmap.contigs=[{args.channel_contig}/0 ")
-
     # setup jobstarters
     gpu_jobstarter = SbatchArrayJobstarter(max_cores=args.max_gpus, gpus=1)
     cpu_jobstarter = SbatchArrayJobstarter(max_cores=args.max_cpus)
@@ -168,6 +165,8 @@ def main(args):
     backbones.df["rfdiffusion_pose_opts"] = [overwrite_linker_length(pose_opts, total_length, linker_length) for pose_opts in backbones.df["rfdiffusion_pose_opts"].to_list()]
 
     # store original motifs for calculation of motif RMSDs later
+#    backbones.df["fixed_residues"] = ResidueSelection([f"{key}{resi}" for key, resi_l in [motif.items() for motif in backbones.df["fixed_residues"].to_list()] for resi in resi_l])
+#    backbones.df["motif_residues"] = [f"{key}{resi}" for key, resi_l in [motif.items() for motif in backbones.df["motif_residues"].to_list()] for resi in resi_l]
     motif_cols = ["fixed_residues", "motif_residues"]
     backbones.df["template_motif"] = backbones.df["motif_residues"]
     backbones.df["template_fixedres"] = backbones.df["fixed_residues"]
@@ -184,6 +183,9 @@ def main(args):
     if args.model == "active_site":
         logging.info("Using Active Site Model. Changing contig strings from pose_options.")
         backbones.df["rfdiffusion_pose_opts"] = [active_site_pose_opts(row["rfdiffusion_pose_opts"], row["template_fixedres"]) for row in backbones]
+
+    # load channel_contig
+    backbones.df["rfdiffusion_pose_opts"] = backbones.df["rfdiffusion_pose_opts"].str.replace("contigmap.contigs=[", f"contigmap.contigs=[{args.channel_contig}/0 ")
 
     # run diffusion
     diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale=5 inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:substrate_contacts,weight:0\\',\\'type:custom_ROG,weight:{args.rog_weight}\\',\\'type:custom_recenter,distance:{args.decentralize_distance}{recenter}\\'] potentials.guide_decay=quadratic"
