@@ -14,6 +14,7 @@ import matplotlib
 import protslurm
 import protslurm.config
 from protslurm.jobstarters import SbatchArrayJobstarter
+import protslurm.residues
 import protslurm.tools
 import protslurm.tools.esmfold
 import protslurm.tools.ligandmpnn
@@ -165,8 +166,8 @@ def main(args):
     backbones.df["rfdiffusion_pose_opts"] = [overwrite_linker_length(pose_opts, total_length, linker_length) for pose_opts in backbones.df["rfdiffusion_pose_opts"].to_list()]
 
     # store original motifs for calculation of motif RMSDs later
-#    backbones.df["fixed_residues"] = ResidueSelection([f"{key}{resi}" for key, resi_l in [motif.items() for motif in backbones.df["fixed_residues"].to_list()] for resi in resi_l])
-#    backbones.df["motif_residues"] = [f"{key}{resi}" for key, resi_l in [motif.items() for motif in backbones.df["motif_residues"].to_list()] for resi in resi_l]
+    backbones.df["fixed_residues"] = [protslurm.residues.from_dict(motif) for motif in backbones.df["fixed_residues"].to_list()]
+    backbones.df["motif_residues"] = [protslurm.residues.from_dict(motif) for motif in backbones.df["motif_residues"].to_list()]
     motif_cols = ["fixed_residues", "motif_residues"]
     backbones.df["template_motif"] = backbones.df["motif_residues"]
     backbones.df["template_fixedres"] = backbones.df["fixed_residues"]
