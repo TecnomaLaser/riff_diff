@@ -310,7 +310,7 @@ def update_and_copy_reference_frags(input_df: pd.DataFrame, ref_col:str, desc_co
 
     # compile list of output filenames
     output_pdb_names_list = [f"{out_pdb_path}/{desc}.pdb" for desc in input_df[desc_col].to_list()]
-    
+
     # renumber
     return [utils.biopython_tools.renumber_pdb_by_residue_mapping(ref_frag, res_mapping, out_pdb_path=pdb_output, keep_chain=keep_ligand_chain) for ref_frag, res_mapping, pdb_output in zip(input_df[ref_col].to_list(), list_of_mappings, output_pdb_names_list)]
 
@@ -706,7 +706,7 @@ def main(args):
     titles_r = ["Total Score", "Core Stability", "Atomic Density", "SAP Score"]
     y_labels_r = ["[REU] / residue", "fa_atr [REU] / residue", "count", "SAP / residue"]
     dims_r = [(-5, 0), (-12, 0), (0, 5), (0, 1.5)]
-    _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols_r, titles=titles_r, y_labels=y_labels_r, dims=dims_r, out_path=f"{plot_dir}/rosetta_final_stats.png")
+    plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols_r, titles=titles_r, y_labels=y_labels_r, dims=dims_r, out_path=f"{plot_dir}/rosetta_final_stats.png")
   
     # final backbone downsampling
     final_downsampling_score = ensembles.calc_composite_score(f"final_downsampling_comp_score", [f"post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", f"af2_bb_ca_motif_rmsd", f"af2_mean_plddt", f"post_refinement_rmsdcheck_fr_sap_score"], [1, 0.25, -0.25, 0.25])

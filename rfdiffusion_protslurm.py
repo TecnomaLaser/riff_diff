@@ -126,6 +126,10 @@ def replace_number_with_10(input_string):
     # Replace found patterns with '10-50'
     return re.sub(pattern, '10-50', input_string)
 
+def add_channel_to_contig(str):
+    '''adds channel to contig'''
+    return output_str
+
 def main(args):
     '''executes everyting (duh)'''
     # logging and checking of inputs
@@ -145,6 +149,9 @@ def main(args):
     # load poses
     backbones = protslurm.poses.load_poses(path_df)
     backbones.set_work_dir(args.output_dir)
+
+    # load channel_contig
+    backbones.df["rfdiffusion_pose_opts"] = backbones.df["rfdiffusion_pose_opts"].str.replace("contigmap.contigs=[", f"contigmap.contigs=[{args.channel_contig}/0 ")
 
     # setup jobstarters
     gpu_jobstarter = SbatchArrayJobstarter(max_cores=args.max_gpus, gpus=1)
@@ -326,6 +333,7 @@ if __name__ == "__main__":
     argparser.add_argument("--overwrite_linker_lengths", type=str, default="50,200", help="linker length, total length. How long should the linkers be, how long should the protein be in total?")
     argparser.add_argument("--rfdiffusion_timesteps", type=int, default=50, help="Specify how many diffusion timesteps to run. 50 recommended. don't change")
     argparser.add_argument("--model", type=str, default="default", help="{default,active_site} Choose which model to use for RFdiffusion (active site or regular model).")
+    argparser.add_argument("--channel_contig", type=str, default="Q1-21", help="RFdiffusion-style contig for chain B")
 
     # ligandmpnn optionals
     argparser.add_argument("--num_mpnn_sequences", type=int, default=8, help="How many LigandMPNN sequences do you want to design after RFdiffusion?")
