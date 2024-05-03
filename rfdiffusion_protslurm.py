@@ -188,6 +188,7 @@ def main(args):
     # load channel_contig
     backbones.df["rfdiffusion_pose_opts"] = backbones.df["rfdiffusion_pose_opts"].str.replace("contigmap.contigs=[", f"contigmap.contigs=[{args.channel_contig}/0 ")
 
+
     # run diffusion
     diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale=5 inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:substrate_contacts,weight:0\\',\\'type:custom_ROG,weight:{args.rog_weight}\\',\\'type:custom_recenter,distance:{args.decentralize_distance}{recenter}\\'] potentials.guide_decay=quadratic"
     rfdiffusion = protslurm.tools.rfdiffusion.RFdiffusion(jobstarter = gpu_jobstarter)
@@ -212,6 +213,7 @@ def main(args):
     if not os.path.isdir((updated_ref_frags_dir := f"{backbones.work_dir}/updated_reference_frags/")):
         os.makedirs(updated_ref_frags_dir)
 
+   
     backbones.df["updated_reference_frags_location"] = update_and_copy_reference_frags(
         input_df = backbones.df,
         ref_col = "input_poses",
@@ -230,12 +232,14 @@ def main(args):
     #not possible, because RFdiffusion output does not yet have sidechains... (really???)
     #catres_ca_rmsd.calc_rmsd(poses = backbones, prefix = "rfdiffusion_catres_rmsd")
 
+
     # add back the ligand:
     chain_adder = protslurm.tools.protein_edits.ChainAdder(jobstarter = cpu_jobstarter)
-    chain_adder.add_chain(
+    chain_adder.superimpose_add_chain(
         poses = backbones,
         prefix = "post_rfdiffusion_ligand",
         ref_col = "updated_reference_frags_location",
+        target_motif = "fixed_residues",
         copy_chain = args.ligand_chain
     )
 
@@ -245,6 +249,7 @@ def main(args):
         poses = backbones,
         prefix = "postdiffusion_ligandmpnn",
         nseq = args.num_mpnn_sequences,
+        model_type = "ligand_mpnn",
         fixed_res_col = "fixed_residues"
     )
 
