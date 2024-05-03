@@ -212,7 +212,6 @@ def main(args):
     # create updated reference frags:
     if not os.path.isdir((updated_ref_frags_dir := f"{backbones.work_dir}/updated_reference_frags/")):
         os.makedirs(updated_ref_frags_dir)
-
    
     backbones.df["updated_reference_frags_location"] = update_and_copy_reference_frags(
         input_df = backbones.df,
@@ -223,15 +222,9 @@ def main(args):
         keep_ligand_chain = args.ligand_chain
     )
 
-    # setup RMSD runners
-    rfdiffusion_bb_ca_rmsd = BackboneRMSD(ref_col="rfdiffusion_location")
-    # motif_ca_rmsd = MotifRMSD(ref_col="updated_reference_frags_location", target_motif = "motif_residues", ref_motif = "motif_residues") # only makes sense for when motifs are used.
+
+    rfdiffusion_bb_rmsd = BackboneRMSD(ref_col="rfdiffusion_location", chains="A")
     catres_ca_rmsd = MotifRMSD(ref_col = "updated_reference_frags_location", target_motif = "fixed_residues", ref_motif = "fixed_residues")
-
-    # calculate RMSD
-    #not possible, because RFdiffusion output does not yet have sidechains... (really???)
-    #catres_ca_rmsd.calc_rmsd(poses = backbones, prefix = "rfdiffusion_catres_rmsd")
-
 
     # add back the ligand:
     chain_adder = protslurm.tools.protein_edits.ChainAdder(jobstarter = cpu_jobstarter)
@@ -262,7 +255,7 @@ def main(args):
 
     # calculate RMSD (backbone, motif, fixedres)
     catres_ca_rmsd.calc_rmsd(poses = backbones, prefix = "esm_catres_rmsd")
-    rfdiffusion_bb_ca_rmsd.calc_rmsd(poses = backbones, prefix = "esm_backbone_rmsd")
+    rfdiffusion_bb_rmsd.calc_rmsd(poses = backbones, prefix = "esm_backbone_rmsd")
 
     # run rosetta_script to evaluate residuewiese energy
     rosetta = protslurm.tools.rosetta.Rosetta(jobstarter = cpu_jobstarter)
