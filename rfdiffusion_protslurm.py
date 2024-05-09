@@ -264,35 +264,35 @@ def main(args):
         prefix = "fastrelax",
         rosetta_application="rosetta_scripts.default.linuxgccrelease",
         nstruct = 15,
-        options = f"-parser:protocol {args.fastrelax_script}"
+        options = f"-parser:protocol {args.fastrelax_script} -beta"
     )
 
     # determine pocket-ness!
 
     # plot outputs
     cols = [
-        "rfdiffusion_catres_rmsd"
-        "esmfold_plddt",
-        "esm_backbone_rmsd",
-        "esm_catres_rmsd"
+        #"rfdiffusion_catres_rmsd",
+        "esm_plddt",
+        "esm_backbone_rmsd_rmsd",
+        "esm_catres_rmsd_heavy_atom_rmsd"
     ]
 
     titles = [
-        "RFDiffusion Sidechain\nRMSD",
+        #"RFDiffusion Sidechain\nRMSD",
         "ESMFold pLDDT",
         "ESMFold BB-Ca RMSD",
         "ESMFold Sidechain\nRMSD"
     ]
 
     y_labels = [
-        "Angstrom",
+        #"Angstrom",
         "pLDDT",
         "Angstrom",
         "Angstrom"
     ]
 
     dims = [
-        (0,8),
+        #(0,8),
         (0,100),
         (0,8),
         (0,8)
