@@ -16,6 +16,7 @@ import protslurm.config
 from protslurm.jobstarters import SbatchArrayJobstarter
 import protslurm.residues
 import protslurm.tools
+import protslurm.tools.alphafold2
 import protslurm.tools.esmfold
 import protslurm.tools.ligandmpnn
 import protslurm.tools.metrics.rmsd
@@ -247,15 +248,16 @@ def main(args):
     )
 
     # predict with ESMFold
-    esmfold = protslurm.tools.esmfold.ESMFold(jobstarter = gpu_jobstarter)
-    backbones = esmfold.run(
+    af2 = protslurm.tools.alphafold2(jobstarter = cpu_jobstarter)
+    backbones = af2.run(
         poses = backbones,
-        prefix = "esm"
+        prefix = "af2",
+        options = "--msa-mode single_sequence --num-models 1 --model-order 4"
     )
 
     # calculate RMSD (backbone, motif, fixedres)
-    catres_ca_rmsd.calc_rmsd(poses = backbones, prefix = "esm_catres_rmsd")
-    rfdiffusion_bb_rmsd.calc_rmsd(poses = backbones, prefix = "esm_backbone_rmsd")
+    catres_ca_rmsd.calc_rmsd(poses = backbones, prefix = "af2_catres")
+    rfdiffusion_bb_rmsd.calc_rmsd(poses = backbones, prefix = "af2_backbone")
 
     # run rosetta_script to evaluate residuewiese energy
     rosetta = protslurm.tools.rosetta.Rosetta(jobstarter = cpu_jobstarter)
@@ -272,9 +274,9 @@ def main(args):
     # plot outputs
     cols = [
         #"rfdiffusion_catres_rmsd",
-        "esm_plddt",
-        "esm_backbone_rmsd_rmsd",
-        "esm_catres_rmsd_heavy_atom_rmsd"
+        "af2_top_plddt",
+        "af2_backbone_rmsd",
+        "af2_catres_heavy_atom_rmsd"
     ]
 
     titles = [
