@@ -2,6 +2,7 @@
 '''
 Script to run RFdiffusion active-site model on artificial motif libraries.
 '''
+from cgitb import small
 import logging
 import os
 import re
@@ -153,8 +154,9 @@ def main(args):
     backbones.set_work_dir(args.output_dir)
 
     # setup jobstarters
-    gpu_jobstarter = SbatchArrayJobstarter(max_cores=args.max_gpus, gpus=1)
     cpu_jobstarter = SbatchArrayJobstarter(max_cores=args.max_cpus)
+    small_cpu_jobstarter = SbatchArrayJobstarter(max_cors=10)
+    gpu_jobstarter = cpu_jobstarter if args.cpu_only else SbatchArrayJobstarter(max_cores=args.max_gpus, gpus=1)
 
     # change flanker lengths of rfdiffusion motif contigs
     if args.flanking:
@@ -203,7 +205,7 @@ def main(args):
     )
 
     # remove channel chain (chain B)
-    chain_remover = protslurm.tools.protein_edits.ChainRemover(jobstarter = cpu_jobstarter)
+    chain_remover = protslurm.tools.protein_edits.ChainRemover(jobstarter = small_cpu_jobstarter)
     chain_remover.remove_chains(
         poses = backbones,
         prefix = "channel_removed",
@@ -213,7 +215,7 @@ def main(args):
     # create updated reference frags:
     if not os.path.isdir((updated_ref_frags_dir := f"{backbones.work_dir}/updated_reference_frags/")):
         os.makedirs(updated_ref_frags_dir)
-   
+
     backbones.df["updated_reference_frags_location"] = update_and_copy_reference_frags(
         input_df = backbones.df,
         ref_col = "input_poses",
@@ -223,9 +225,8 @@ def main(args):
         keep_ligand_chain = args.ligand_chain
     )
 
-
-    rfdiffusion_bb_rmsd = BackboneRMSD(ref_col="rfdiffusion_location", chains="A")
-    catres_ca_rmsd = MotifRMSD(ref_col = "updated_reference_frags_location", target_motif = "fixed_residues", ref_motif = "fixed_residues")
+    rfdiffusion_bb_rmsd = BackboneRMSD(ref_col="rfdiffusion_location", chains="A", jobstarter = small_cpu_jobstarter)
+    catres_ca_rmsd = MotifRMSD(ref_col = "updated_reference_frags_location", target_motif = "fixed_residues", ref_motif = "fixed_residues", jobstarter=small_cpu_jobstarter)
 
     # add back the ligand:
     chain_adder = protslurm.tools.protein_edits.ChainAdder(jobstarter = cpu_jobstarter)
@@ -276,28 +277,32 @@ def main(args):
         #"rfdiffusion_catres_rmsd",
         "af2_plddt",
         "af2_backbone_rmsd",
-        "af2_catres_heavy_atom_rmsd"
+        "af2_catres_heavy_atom_rmsd",
+        "fastrelax_total_score"
     ]
 
     titles = [
         #"RFDiffusion Sidechain\nRMSD",
         "ESMFold pLDDT",
         "ESMFold BB-Ca RMSD",
-        "ESMFold Sidechain\nRMSD"
+        "ESMFold Sidechain\nRMSD",
+        "Rosetta total_score"
     ]
 
     y_labels = [
         #"Angstrom",
         "pLDDT",
         "Angstrom",
-        "Angstrom"
+        "Angstrom",
+        "[REU]"
     ]
 
     dims = [
         #(0,8),
         (0,100),
         (0,8),
-        (0,8)
+        (0,8),
+        None
     ]
 
     # plot results
@@ -320,6 +325,7 @@ if __name__ == "__main__":
 
     # general optionals
     argparser.add_argument("--ligand_chain", type=str, default="Z", help="Chain name of the ligand chain.")
+    argparser.add_argument("--cpu_only", actio="store_true", help="Should only cpu's be used during the entire pipeline run?")
 
     # jobstarter
     argparser.add_argument("--max_gpus", type=int, default=10, help="How many GPUs do you want to use at once?")
