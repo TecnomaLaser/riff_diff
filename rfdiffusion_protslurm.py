@@ -2,7 +2,6 @@
 '''
 Script to run RFdiffusion active-site model on artificial motif libraries.
 '''
-from cgitb import small
 import logging
 import os
 import re
@@ -129,10 +128,6 @@ def replace_number_with_10(input_string):
     # Replace found patterns with '10-50'
     return re.sub(pattern, '10-50', input_string)
 
-def add_channel_to_contig(str):
-    '''adds channel to contig'''
-    return output_str
-
 def main(args):
     '''executes everyting (duh)'''
     # logging and checking of inputs
@@ -155,7 +150,7 @@ def main(args):
 
     # setup jobstarters
     cpu_jobstarter = SbatchArrayJobstarter(max_cores=args.max_cpus)
-    small_cpu_jobstarter = SbatchArrayJobstarter(max_cors=10)
+    small_cpu_jobstarter = SbatchArrayJobstarter(max_cores=10)
     gpu_jobstarter = cpu_jobstarter if args.cpu_only else SbatchArrayJobstarter(max_cores=args.max_gpus, gpus=1)
 
     # change flanker lengths of rfdiffusion motif contigs
