@@ -191,7 +191,7 @@ def main(args):
 
 
     # run diffusion
-    diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale=5 inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:substrate_contacts,weight:0\\',\\'type:custom_ROG,weight:{args.rog_weight}\\',\\'type:custom_recenter,distance:{args.decentralize_distance}{recenter}\\'] potentials.guide_decay=quadratic"
+    diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale=5 inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:substrate_contacts,weight:0\\',\\'type:custom_ROG,weight:{args.rog_weight}\\',\\'type:custom_recenter,weight:10,distance:{args.decentralize_distance}{recenter}\\'] potentials.guide_decay=quadratic"
     rfdiffusion = protslurm.tools.rfdiffusion.RFdiffusion(jobstarter = gpu_jobstarter)
     backbones = rfdiffusion.run(
         poses=backbones,
@@ -248,7 +248,7 @@ def main(args):
     )
 
     # predict with ESMFold
-    af2 = protslurm.tools.alphafold2(jobstarter = cpu_jobstarter)
+    af2 = protslurm.tools.alphafold2.Alphafold2(jobstarter = cpu_jobstarter)
     backbones = af2.run(
         poses = backbones,
         prefix = "af2",
@@ -274,7 +274,7 @@ def main(args):
     # plot outputs
     cols = [
         #"rfdiffusion_catres_rmsd",
-        "af2_top_plddt",
+        "af2_plddt",
         "af2_backbone_rmsd",
         "af2_catres_heavy_atom_rmsd"
     ]
