@@ -100,7 +100,7 @@ def update_and_copy_reference_frags(input_df: pd.DataFrame, ref_col:str, desc_co
     # renumber
     return [renumber_pdb_by_residue_mapping(ref_frag, res_mapping, out_pdb_path=pdb_output, keep_chain=keep_ligand_chain) for ref_frag, res_mapping, pdb_output in zip(input_df[ref_col].to_list(), list_of_mappings, output_pdb_names_list)]
 
-def active_site_pose_opts(input_opt: str, motif: dict) -> str:
+def active_site_pose_opts(input_opt: str, motif: protslurm.residues.ResidueSelection) -> str:
     '''Converts rfdiffusion_pose_opts string from default model to pose_opts string for active_site model (removes inpaint_seq and stuff.)'''
     def re_split_rfdiffusion_opts(command: str) -> list:
         if command is None:
@@ -114,8 +114,8 @@ def active_site_pose_opts(input_opt: str, motif: dict) -> str:
     contig = replace_number_with_10(contig)
 
     # exchange fixed residues in contig:
-    for chain, res in motif.items():
-        contig = contig.replace(f"{chain}1-7", f"{chain}{res[0]}-{res[0]}")
+    for (chain, res) in motif.residues:
+        contig = contig.replace(f"{chain}1-7", f"{chain}{res}-{res}")
 
     # remerge contig into opts_l and return concatenated opts:
     opts_l[0] = contig
@@ -163,10 +163,16 @@ def main(args):
     linker_length, total_length = [int(x) for x in args.overwrite_linker_lengths.split(",")]
     backbones.df["rfdiffusion_pose_opts"] = [overwrite_linker_length(pose_opts, total_length, linker_length) for pose_opts in backbones.df["rfdiffusion_pose_opts"].to_list()]
 
-    # store original motifs for calculation of motif RMSDs later
+    # convert motifs from dict to ResidueSelection
     backbones.df["fixed_residues"] = [protslurm.residues.from_dict(motif) for motif in backbones.df["fixed_residues"].to_list()]
     backbones.df["motif_residues"] = [protslurm.residues.from_dict(motif) for motif in backbones.df["motif_residues"].to_list()]
-    motif_cols = ["fixed_residues", "motif_residues"]
+
+    # set motif_cols to keep after rfdiffusion:
+    motif_cols = ["fixed_residues"]
+    if args.model == "default":
+        motif_cols.append("motif_residues")
+
+    # store original motifs for calculation of motif RMSDs later
     backbones.df["template_motif"] = backbones.df["motif_residues"]
     backbones.df["template_fixedres"] = backbones.df["fixed_residues"]
 
@@ -320,7 +326,7 @@ if __name__ == "__main__":
 
     # general optionals
     argparser.add_argument("--ligand_chain", type=str, default="Z", help="Chain name of the ligand chain.")
-    argparser.add_argument("--cpu_only", actio="store_true", help="Should only cpu's be used during the entire pipeline run?")
+    argparser.add_argument("--cpu_only", action="store_true", help="Should only cpu's be used during the entire pipeline run?")
 
     # jobstarter
     argparser.add_argument("--max_gpus", type=int, default=10, help="How many GPUs do you want to use at once?")
