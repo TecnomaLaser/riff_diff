@@ -250,16 +250,15 @@ def main(args):
     )
 
     # predict with ESMFold
-    af2 = protslurm.tools.alphafold2.Alphafold2(jobstarter = cpu_jobstarter)
-    backbones = af2.run(
+    esmfold = protslurm.tools.esmfold.ESMFold(jobstarter = gpu_jobstarter)
+    backbones = esmfold.run(
         poses = backbones,
-        prefix = "af2",
-        options = "--msa-mode single_sequence --num-models 1 --model-order 4"
+        prefix = "esm",
     )
 
     # calculate RMSD (backbone, motif, fixedres)
-    catres_ca_rmsd.calc_rmsd(poses = backbones, prefix = "af2_catres")
-    rfdiffusion_bb_rmsd.calc_rmsd(poses = backbones, prefix = "af2_backbone")
+    catres_ca_rmsd.calc_rmsd(poses = backbones, prefix = "esm_catres")
+    rfdiffusion_bb_rmsd.calc_rmsd(poses = backbones, prefix = "esm_backbone")
 
     # run rosetta_script to evaluate residuewiese energy
     rosetta = protslurm.tools.rosetta.Rosetta(jobstarter = cpu_jobstarter)
@@ -267,18 +266,26 @@ def main(args):
         poses = backbones,
         prefix = "fastrelax",
         rosetta_application="rosetta_scripts.default.linuxgccrelease",
-        nstruct = 15,
+        nstruct = 5,
         options = f"-parser:protocol {args.fastrelax_script} -beta"
     )
 
+    # filter down after fastrelax
+    backbones.filter_poses_by_rank(
+        n = 1,
+        score_col = "fastrelax_total_score",
+        remove_layers = 1,
+        prefix = "fastrelax_filter",
+        plot = True
+    )
     # determine pocket-ness!
 
     # plot outputs
     cols = [
         #"rfdiffusion_catres_rmsd",
-        "af2_plddt",
-        "af2_backbone_rmsd",
-        "af2_catres_heavy_atom_rmsd",
+        "esm_plddt",
+        "esm_backbone_rmsd",
+        "esm_catres_heavy_atom_rmsd",
         "fastrelax_total_score"
     ]
 
