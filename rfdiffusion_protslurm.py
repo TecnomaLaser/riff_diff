@@ -2,6 +2,7 @@
 '''
 Script to run RFdiffusion active-site model on artificial motif libraries.
 '''
+#imports
 import logging
 import os
 import re
@@ -25,9 +26,11 @@ import protslurm.tools.rfdiffusion
 from protslurm.tools.metrics.rmsd import BackboneRMSD, MotifRMSD
 import protslurm.tools.rosetta
 from protslurm.utils.biopython_tools import renumber_pdb_by_residue_mapping
+import protslurm.utils.plotting as plots
+from protslurm.utils.metrics import calc_rog_of_pdb
 
 # local
-import protslurm.utils.plotting as plots
+from .utils.pymol_tools import write_pymol_alignment_script
 
 if __file__.startswith("/home/mabr3112"):
     matplotlib.use('Agg')
@@ -228,7 +231,10 @@ def main(args):
     )
 
     rfdiffusion_bb_rmsd = BackboneRMSD(ref_col="rfdiffusion_location", chains="A", jobstarter = small_cpu_jobstarter)
-    catres_ca_rmsd = MotifRMSD(ref_col = "updated_reference_frags_location", target_motif = "fixed_residues", ref_motif = "fixed_residues", jobstarter=small_cpu_jobstarter)
+    catres_motif_rmsd = MotifRMSD(ref_col = "updated_reference_frags_location", target_motif = "fixed_residues", ref_motif = "fixed_residues", jobstarter=small_cpu_jobstarter)
+
+    # calculate ROG after RFDiffusion, when channel chain is already removed:
+    backbones.df["rfdiffusion_rog"] = [calc_rog_of_pdb(pose) for pose in backbones.poses_list()]
 
     # add back the ligand:
     chain_adder = protslurm.tools.protein_edits.ChainAdder(jobstarter = cpu_jobstarter)
@@ -258,7 +264,8 @@ def main(args):
     )
 
     # calculate RMSD (backbone, motif, fixedres)
-    catres_ca_rmsd.calc_rmsd(poses = backbones, prefix = "esm_catres")
+    catres_motif_rmsd.calc_rmsd(poses = backbones, prefix = "esm_catres_heavy")
+    catres_motif_rmsd.calc_rmsd(poses = backbones, prefix = "esm_catres_bb", atoms=["CA", "C", "N"])
     rfdiffusion_bb_rmsd.calc_rmsd(poses = backbones, prefix = "esm_backbone")
 
     # run rosetta_script to evaluate residuewiese energy
@@ -279,6 +286,10 @@ def main(args):
         prefix = "fastrelax_filter",
         plot = True
     )
+
+    #TODO: calculate backbone designability
+
+
     # determine pocket-ness!
 
     # plot outputs
@@ -286,7 +297,7 @@ def main(args):
         #"rfdiffusion_catres_rmsd",
         "esm_plddt",
         "esm_backbone_rmsd",
-        "esm_catres_heavy_atom_rmsd",
+        "esm_catres_heavy_rmsd",
         "fastrelax_total_score"
     ]
 
@@ -324,7 +335,51 @@ def main(args):
         out_path = f"{backbones.work_dir}/design_results.png"
     )
 
+    # filter poses by values:
+    backbones.filter_poses_by_value(score_col="esm_plddt", value=75, operator=">=")
+    backbones.filter_poses_by_value(score_col="esm_backbone_rmsd", value=2, operator="<=")
+
+    # calculate multi-scoerterm score for the final backbone filter:
+    backbones.calculate_composite_score(
+        name="design_composite_score",
+        scoreterms=["esm_plddt", "esm_backbone_rmsd", "esm_catres_bb_rmsd", "esm_catres_heavy_rmsd"],
+        weights=[0.2, 0.2, 0.4, 0.4],
+        plot=True
+    )
+
+    backbones.filter_poses_by_rank(
+        n=25,
+        score_col="design_composite_score",
+        prefix="final_backbone_filter",
+        plot=True
+    )
+
+    # copy filtered poses to new location
+    results_dir = backbones.work_dir + "/results/"
+    backbones.save_poses(out_path=results_dir)
+    backbones.save_poses(out_path=results_dir, poses_col="input_poses")
+    backbones.save_scores(out_path=results_dir)
+
     # write pymol alignment script?
+    _ = write_pymol_alignment_script(
+        df=backbones.df,
+        scoreterm="new_score",
+        top_n=25,
+        path_to_script=f"{backbones.work_dir}/align_results.pml",
+        ref_motif_col = "template_fixedres",
+        target_motif_col = "fixed_residues",
+        ref_catres_col = "template_fixedres",
+        target_catres_col = "fixed_residues"
+    )
+
+    plots.violinplot_multiple_cols(
+        df = backbones.df,
+        cols = cols,
+        titles = titles,
+        y_labels = y_labels,
+        dims = dims,
+        out_path = f"{backbones.work_dir}/filtered_design_results.png"
+    )
 
 if __name__ == "__main__":
     import argparse
