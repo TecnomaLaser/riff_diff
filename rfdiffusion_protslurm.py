@@ -152,6 +152,7 @@ def main(args):
     cpu_jobstarter = SbatchArrayJobstarter(max_cores=args.max_cpus)
     small_cpu_jobstarter = SbatchArrayJobstarter(max_cores=10)
     gpu_jobstarter = cpu_jobstarter if args.cpu_only else SbatchArrayJobstarter(max_cores=args.max_gpus, gpus=1)
+    real_gpu_jobstarter = SbatchArrayJobstarter(max_cores=10, gpus=1)
 
     # change flanker lengths of rfdiffusion motif contigs
     if args.flanking:
@@ -250,7 +251,7 @@ def main(args):
     )
 
     # predict with ESMFold
-    esmfold = protslurm.tools.esmfold.ESMFold(jobstarter = gpu_jobstarter)
+    esmfold = protslurm.tools.esmfold.ESMFold(jobstarter = real_gpu_jobstarter)
     backbones = esmfold.run(
         poses = backbones,
         prefix = "esm",
