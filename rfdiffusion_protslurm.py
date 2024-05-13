@@ -6,6 +6,7 @@ Script to run RFdiffusion active-site model on artificial motif libraries.
 import logging
 import os
 import re
+import sys
 
 # dependency
 import pandas as pd
@@ -30,7 +31,9 @@ import protslurm.utils.plotting as plots
 from protslurm.utils.metrics import calc_rog_of_pdb
 
 # local
-from .utils.pymol_tools import write_pymol_alignment_script
+sys.path.append("/home/mabr3112/riff_diff/")
+from utils.pymol_tools import write_pymol_alignment_script
+
 
 if __file__.startswith("/home/mabr3112"):
     matplotlib.use('Agg')
@@ -264,9 +267,12 @@ def main(args):
     )
 
     # calculate RMSD (backbone, motif, fixedres)
-    catres_motif_rmsd.calc_rmsd(poses = backbones, prefix = "esm_catres_heavy")
-    catres_motif_rmsd.calc_rmsd(poses = backbones, prefix = "esm_catres_bb", atoms=["CA", "C", "N"])
-    rfdiffusion_bb_rmsd.calc_rmsd(poses = backbones, prefix = "esm_backbone")
+    backbones = catres_motif_rmsd.calc_rmsd(poses = backbones, prefix = "esm_catres_heavy")
+    print([x for x in backbones.df if "esm" in x])
+    backbones = catres_motif_rmsd.calc_rmsd(poses = backbones, prefix = "esm_catres_bb", atoms=["CA", "C", "N"])
+    print([x for x in backbones.df if "esm" in x])
+    backbones = rfdiffusion_bb_rmsd.calc_rmsd(poses = backbones, prefix = "esm_backbone")
+    print([x for x in backbones.df if "esm" in x])
 
     # run rosetta_script to evaluate residuewiese energy
     rosetta = protslurm.tools.rosetta.Rosetta(jobstarter = cpu_jobstarter)
@@ -326,6 +332,7 @@ def main(args):
     ]
 
     # plot results
+    print([x for x in backbones.df if "esm" in x])
     plots.violinplot_multiple_cols(
         df = backbones.df,
         cols = cols,
@@ -363,7 +370,7 @@ def main(args):
     # write pymol alignment script?
     _ = write_pymol_alignment_script(
         df=backbones.df,
-        scoreterm="new_score",
+        scoreterm="design_composite_score",
         top_n=25,
         path_to_script=f"{backbones.work_dir}/align_results.pml",
         ref_motif_col = "template_fixedres",
