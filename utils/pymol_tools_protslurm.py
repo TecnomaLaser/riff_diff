@@ -46,7 +46,7 @@ def write_pymol_motif_selection(obj: str, motif: dict) -> str:
     if isinstance(motif, ResidueSelection):
         motif = motif.to_dict()
 
-    residues = [f"chain {chain} and resi {'+'.join([str(x) for x in res_ids])}" for (chain, res_ids) in motif]
+    residues = [f"chain {chain} and resi {'+'.join([str(x) for x in res_ids])}" for chain, res_ids in motif.items()]
     pymol_selection = ' or '.join([f"{obj} and {resis}" for resis in residues])
     return pymol_selection
 
@@ -73,8 +73,8 @@ def write_align_cmds(input_data: pd.Series, use_original_location=False, ref_mot
     cmds.append(f"select temp_motif_res, {write_pymol_motif_selection(input_data['poses_description'], input_data[target_motif_col])}")
     cmds.append(f"select temp_ref_res, {write_pymol_motif_selection(ref_pose_name, input_data[ref_motif_col])}")
 
-    # superimpose inpaint_motif_residues:
-    cmds.append(f"cealign temp_ref_res, temp_motif_res")
+    # alignimpose inpaint_motif_residues:
+    cmds.append(f"align temp_ref_res, temp_motif_res")
 
     # select fixed residues, show sticks and color
     cmds.append(f"select temp_cat_res, {write_pymol_motif_selection(input_data['poses_description'], input_data[target_catres_col])}")
@@ -115,8 +115,8 @@ def write_align_cmds_v2(input_data: pd.Series, pose_col="poses_description", ref
     cmds.append(f"select temp_motif_res, {write_pymol_motif_selection(input_data[pose_col], input_data[motif_res_col])}")
     cmds.append(f"select temp_ref_res, {write_pymol_motif_selection(ref_pose_name, input_data[ref_motif_res_col])}")
 
-    # superimpose inpaint_motif_residues:
-    cmds.append(f"cealign temp_ref_res, temp_motif_res")
+    # alignimpose inpaint_motif_residues:
+    cmds.append(f"align temp_ref_res, temp_motif_res")
 
     # select fixed residues, show sticks and color
     cmds.append(f"select temp_cat_res, {write_pymol_motif_selection(input_data[pose_col], input_data[fixed_res_col])}")

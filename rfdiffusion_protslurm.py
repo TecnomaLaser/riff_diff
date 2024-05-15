@@ -32,7 +32,7 @@ from protslurm.utils.metrics import calc_rog_of_pdb
 
 # local
 sys.path.append("/home/mabr3112/riff_diff/")
-from utils.pymol_tools import write_pymol_alignment_script
+from utils.pymol_tools_protslurm import write_pymol_alignment_script
 
 
 if __file__.startswith("/home/mabr3112"):
@@ -201,7 +201,7 @@ def main(args):
 
 
     # run diffusion
-    diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale=5 inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:substrate_contacts,weight:0\\',\\'type:custom_ROG,weight:{args.rog_weight}\\',\\'type:custom_recenter,weight:10,distance:{args.decentralize_distance}{recenter}\\'] potentials.guide_decay=quadratic"
+    diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale=5 inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:substrate_contacts,weight:0\\',\\'type:custom_ROG,weight:{args.rog_weight}\\',\\'type:custom_recenter,weight:{args.decentralize_weight},distance:{args.decentralize_distance}{recenter}\\'] potentials.guide_decay=quadratic"
     rfdiffusion = protslurm.tools.rfdiffusion.RFdiffusion(jobstarter = gpu_jobstarter)
     backbones = rfdiffusion.run(
         poses=backbones,
@@ -372,7 +372,7 @@ def main(args):
         df=backbones.df,
         scoreterm="design_composite_score",
         top_n=25,
-        path_to_script=f"{backbones.work_dir}/align_results.pml",
+        path_to_script=f"{results_dir}/align_results.pml",
         ref_motif_col = "template_fixedres",
         target_motif_col = "fixed_residues",
         ref_catres_col = "template_fixedres",
@@ -413,6 +413,7 @@ if __name__ == "__main__":
     argparser.add_argument("--rfdiffusion_timesteps", type=int, default=50, help="Specify how many diffusion timesteps to run. 50 recommended. don't change")
     argparser.add_argument("--model", type=str, default="default", help="{default,active_site} Choose which model to use for RFdiffusion (active site or regular model).")
     argparser.add_argument("--channel_contig", type=str, default="Q1-21", help="RFdiffusion-style contig for chain B")
+    argparser.add_argument("--decentralize_weight", type=float, default=15, help="Weight of decentralization potential for RFdiffusion.")
 
     # ligandmpnn optionals
     argparser.add_argument("--num_mpnn_sequences", type=int, default=8, help="How many LigandMPNN sequences do you want to design after RFdiffusion?")
