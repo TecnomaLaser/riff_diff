@@ -22,6 +22,7 @@ import protslurm.tools.alphafold2
 import protslurm.tools.esmfold
 import protslurm.tools.ligandmpnn
 import protslurm.tools.metrics.rmsd
+import protslurm.tools.metrics.tmscore
 import protslurm.tools.protein_edits
 import protslurm.tools.rfdiffusion
 from protslurm.tools.metrics.rmsd import BackboneRMSD, MotifRMSD
@@ -273,6 +274,14 @@ def main(args):
     print([x for x in backbones.df if "esm" in x])
     backbones = rfdiffusion_bb_rmsd.calc_rmsd(poses = backbones, prefix = "esm_backbone")
     print([x for x in backbones.df if "esm" in x])
+
+    # calculate TM-Score and get sc-tm score:
+    tm_score_calculator = protslurm.tools.metrics.tmscore.TMalign(jobstarter = small_cpu_jobstarter)
+    tm_score_calculator.run(
+        poses = backbones,
+        prefix = "esm_tm",
+        ref_col = "rfdiffusion_location",
+    )
 
     # run rosetta_script to evaluate residuewiese energy
     rosetta = protslurm.tools.rosetta.Rosetta(jobstarter = cpu_jobstarter)
