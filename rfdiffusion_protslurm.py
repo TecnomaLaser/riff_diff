@@ -309,7 +309,7 @@ def main(args):
     )
 
     # determine pocket-ness!
-    fpocket_runner = protslurm.tools.metrics.fpocket.FPocket(jobstarter=small_cpu_jobstarter)
+    fpocket_runner = protslurm.tools.metrics.fpocket.FPocket(jobstarter=cpu_jobstarter)
     fpocket_runner.run(
         poses = backbones,
         prefix = "postrelax"
