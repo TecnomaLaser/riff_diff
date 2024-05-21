@@ -11,8 +11,6 @@ import sys
 # dependency
 import pandas as pd
 import matplotlib
-
-# custom
 import protslurm
 import protslurm.config
 from protslurm.jobstarters import SbatchArrayJobstarter
@@ -23,6 +21,7 @@ import protslurm.tools.esmfold
 import protslurm.tools.ligandmpnn
 import protslurm.tools.metrics.rmsd
 import protslurm.tools.metrics.tmscore
+import protslurm.tools.metrics.fpocket
 import protslurm.tools.protein_edits
 import protslurm.tools.rfdiffusion
 from protslurm.tools.metrics.rmsd import BackboneRMSD, MotifRMSD
@@ -30,6 +29,8 @@ import protslurm.tools.rosetta
 from protslurm.utils.biopython_tools import renumber_pdb_by_residue_mapping
 import protslurm.utils.plotting as plots
 from protslurm.utils.metrics import calc_rog_of_pdb
+
+# custom
 
 # local
 sys.path.append("/home/mabr3112/riff_diff/")
@@ -239,7 +240,7 @@ def main(args):
 
     # calculate ROG after RFDiffusion, when channel chain is already removed:
     backbones.df["rfdiffusion_rog"] = [calc_rog_of_pdb(pose) for pose in backbones.poses_list()]
-     
+
     # calculate motif_rmsd of RFdiffusion (for plotting later)
     catres_motif_rmsd.calc_rmsd(
         poses = backbones,
@@ -288,9 +289,6 @@ def main(args):
         overwrite = True
     )
 
-    # superimpose backbones
-    # calculate SC-TM score
-
     # run rosetta_script to evaluate residuewiese energy
     rosetta = protslurm.tools.rosetta.Rosetta(jobstarter = cpu_jobstarter)
     rosetta.run(
@@ -310,6 +308,13 @@ def main(args):
         plot = True
     )
 
+    # determine pocket-ness!
+    fpocket_runner = protslurm.tools.metrics.fpocket.FPocket(jobstarter=small_cpu_jobstarter)
+    fpocket_runner.run(
+        poses = backbones,
+        prefix = "postrelax"
+    )
+
     # plot outputs
     cols = [
         "rfdiffusion_catres_rmsd",
@@ -317,7 +322,9 @@ def main(args):
         "esm_backbone_rmsd",
         "esm_catres_heavy_rmsd",
         "fastrelax_total_score",
-        "esm_tm_sc_tm"
+        "esm_tm_sc_tm",
+        "postrelax_top_druggability_score",
+        "postrelax_top_volume"
     ]
 
     titles = [
@@ -326,7 +333,9 @@ def main(args):
         "ESMFold BB-Ca RMSD",
         "ESMFold Sidechain\nRMSD",
         "Rosetta total_score",
-        "SC-TM Score"
+        "SC-TM Score",
+        "FPocket\nDruggability",
+        "FPocket\nVolume"
     ]
 
     y_labels = [
@@ -335,7 +344,9 @@ def main(args):
         "Angstrom",
         "Angstrom",
         "[REU]",
-        "TM Score"
+        "TM Score",
+        "Druggability",
+        "Volume [AU]"
     ]
 
     dims = [
@@ -344,7 +355,9 @@ def main(args):
         (0,8),
         (0,8),
         None,
-        (0,1)
+        (0,1),
+        None,
+        None
     ]
 
     # plot results
