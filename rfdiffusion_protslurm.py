@@ -283,6 +283,9 @@ def main(args):
         ref_col = "rfdiffusion_location",
     )
 
+    # superimpose backbones
+    # calculate SC-TM score
+
     # run rosetta_script to evaluate residuewiese energy
     rosetta = protslurm.tools.rosetta.Rosetta(jobstarter = cpu_jobstarter)
     rosetta.run(
