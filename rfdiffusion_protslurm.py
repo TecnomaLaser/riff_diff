@@ -239,6 +239,13 @@ def main(args):
 
     # calculate ROG after RFDiffusion, when channel chain is already removed:
     backbones.df["rfdiffusion_rog"] = [calc_rog_of_pdb(pose) for pose in backbones.poses_list()]
+     
+    # calculate motif_rmsd of RFdiffusion (for plotting later)
+    catres_motif_rmsd.calc_rmsd(
+        poses = backbones,
+        prefix = "rfdiffusion_catres",
+        atoms = ["CA", "C", "N"]
+    )
 
     # add back the ligand:
     chain_adder = protslurm.tools.protein_edits.ChainAdder(jobstarter = cpu_jobstarter)
@@ -269,11 +276,8 @@ def main(args):
 
     # calculate RMSD (backbone, motif, fixedres)
     backbones = catres_motif_rmsd.calc_rmsd(poses = backbones, prefix = "esm_catres_heavy")
-    print([x for x in backbones.df if "esm" in x])
     backbones = catres_motif_rmsd.calc_rmsd(poses = backbones, prefix = "esm_catres_bb", atoms=["CA", "C", "N"])
-    print([x for x in backbones.df if "esm" in x])
     backbones = rfdiffusion_bb_rmsd.calc_rmsd(poses = backbones, prefix = "esm_backbone")
-    print([x for x in backbones.df if "esm" in x])
 
     # calculate TM-Score and get sc-tm score:
     tm_score_calculator = protslurm.tools.metrics.tmscore.TMalign(jobstarter = small_cpu_jobstarter)
@@ -281,6 +285,7 @@ def main(args):
         poses = backbones,
         prefix = "esm_tm",
         ref_col = "rfdiffusion_location",
+        overwrite = True
     )
 
     # run rosetta_script to evaluate residuewiese energy
@@ -302,46 +307,44 @@ def main(args):
         plot = True
     )
 
-    #TODO: calculate backbone designability
-
-
-    # determine pocket-ness!
-
     # plot outputs
     cols = [
-        #"rfdiffusion_catres_rmsd",
+        "rfdiffusion_catres_rmsd",
         "esm_plddt",
         "esm_backbone_rmsd",
         "esm_catres_heavy_rmsd",
-        "fastrelax_total_score"
+        "fastrelax_total_score",
+        "esm_tm_sc_tm"
     ]
 
     titles = [
-        #"RFDiffusion Sidechain\nRMSD",
+        "RFDiffusion Motif\nBackbone RMSD",
         "ESMFold pLDDT",
         "ESMFold BB-Ca RMSD",
         "ESMFold Sidechain\nRMSD",
-        "Rosetta total_score"
+        "Rosetta total_score",
+        "SC-TM Score"
     ]
 
     y_labels = [
-        #"Angstrom",
+        "Angstrom",
         "pLDDT",
         "Angstrom",
         "Angstrom",
-        "[REU]"
+        "[REU]",
+        "TM Score"
     ]
 
     dims = [
-        #(0,8),
+        (0,8),
         (0,100),
         (0,8),
         (0,8),
-        None
+        None,
+        (0,1)
     ]
 
     # plot results
-    print([x for x in backbones.df if "esm" in x])
     plots.violinplot_multiple_cols(
         df = backbones.df,
         cols = cols,
