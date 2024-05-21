@@ -308,11 +308,20 @@ def main(args):
         plot = True
     )
 
-    # determine pocket-ness!
+    # add back ligand and determine pocket-ness!
+    chain_adder.superimpose_add_chain(
+        poses = backbones,
+        prefix = "post_prediction_ligand",
+        ref_col = "updated_reference_frags_location",
+        target_motif = "fixed_residues",
+        copy_chain = args.ligand_chain
+    )
+
     fpocket_runner = protslurm.tools.metrics.fpocket.FPocket(jobstarter=cpu_jobstarter)
     fpocket_runner.run(
         poses = backbones,
-        prefix = "postrelax"
+        prefix = "postrelax",
+        options = f"--chain_as_ligand {args.ligand_chain}"
     )
 
     # plot outputs
