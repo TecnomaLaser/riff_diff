@@ -16,7 +16,7 @@ import protslurm.config
 from protslurm.jobstarters import SbatchArrayJobstarter
 import protslurm.residues
 import protslurm.tools
-import protslurm.tools.alphafold2
+import protslurm.tools.colabfold
 import protslurm.tools.esmfold
 import protslurm.tools.ligandmpnn
 import protslurm.tools.metrics.rmsd
@@ -143,9 +143,16 @@ def main(args):
         raise ValueError(f"Not a directory: {args.input_dir}.")
     if not os.path.isdir(args.output_dir):
         os.makedirs(args.output_dir, exist_ok=True)
+    logging.basicConfig(
+        filename=f'{args.output_dir}/rfdiffusion_protslurm_log.txt',
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
+
     logging.info(f"\n{'#'*50}\nRunning rfdiffusion_protslurm.py on {args.input_dir}\n{'#'*50}\n")
 
     # format path_df to be a DF readable by Poses class
+    logging.info(f"Parsing inputs specified at {args.input_dir}")
     input_df = pd.read_json(f"{args.input_dir}/selected_paths.json", typ="frame")
     input_df = input_df.reset_index().rename(columns={"index": "poses_description"})
     input_df["poses"] = f"{args.input_dir}/pdb_in/" + input_df["poses_description"] + ".pdb"
@@ -187,6 +194,7 @@ def main(args):
 
     # setup rfdiffusion options:
     if args.recenter:
+        logging.info(f"Parameter --recenter specified. Setting direction for custom recentering during diffusion towards {args.recenter}")
         if len(args.recenter.split(";")) != 3:
             raise ValueError(f"--recenter needs to be semicolon separated coordinates. E.g. --recenter=31.123;-12.123;-0.342")
         recenter = f",recenter_xyz:{args.recenter}"
@@ -201,8 +209,8 @@ def main(args):
     # load channel_contig
     backbones.df["rfdiffusion_pose_opts"] = backbones.df["rfdiffusion_pose_opts"].str.replace("contigmap.contigs=[", f"contigmap.contigs=[{args.channel_contig}/0 ")
 
-
     # run diffusion
+    logging.info(f"Running RFDiffusion on {len(backbones)} poses with {args.num_rfdiffusions} diffusions per pose.")
     diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale=5 inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:substrate_contacts,weight:0\\',\\'type:custom_ROG,weight:{args.rog_weight}\\',\\'type:custom_recenter,weight:{args.decentralize_weight},distance:{args.decentralize_distance}{recenter}\\'] potentials.guide_decay=quadratic"
     rfdiffusion = protslurm.tools.rfdiffusion.RFdiffusion(jobstarter = gpu_jobstarter)
     backbones = rfdiffusion.run(
@@ -215,6 +223,7 @@ def main(args):
     )
 
     # remove channel chain (chain B)
+    logging.info(f"Diffusion completed, removing channel chain from diffusion outputs.")
     chain_remover = protslurm.tools.protein_edits.ChainRemover(jobstarter = small_cpu_jobstarter)
     chain_remover.remove_chains(
         poses = backbones,
@@ -226,6 +235,7 @@ def main(args):
     if not os.path.isdir((updated_ref_frags_dir := f"{backbones.work_dir}/updated_reference_frags/")):
         os.makedirs(updated_ref_frags_dir)
 
+    logging.info(f"Channel chain removeds, now renumbering reference fragments.")
     backbones.df["updated_reference_frags_location"] = update_and_copy_reference_frags(
         input_df = backbones.df,
         ref_col = "input_poses",
@@ -239,6 +249,7 @@ def main(args):
     catres_motif_rmsd = MotifRMSD(ref_col = "updated_reference_frags_location", target_motif = "fixed_residues", ref_motif = "fixed_residues", jobstarter=small_cpu_jobstarter)
 
     # calculate ROG after RFDiffusion, when channel chain is already removed:
+    logging.info(f"Calculating rfdiffusion_rog and rfdiffusion_catres_rmsd")
     backbones.df["rfdiffusion_rog"] = [calc_rog_of_pdb(pose) for pose in backbones.poses_list()]
 
     # calculate motif_rmsd of RFdiffusion (for plotting later)
@@ -249,6 +260,7 @@ def main(args):
     )
 
     # add back the ligand:
+    logging.info(f"Metrics calculated, now adding Ligand chain back into backbones.")
     chain_adder = protslurm.tools.protein_edits.ChainAdder(jobstarter = cpu_jobstarter)
     chain_adder.superimpose_add_chain(
         poses = backbones,
@@ -259,6 +271,7 @@ def main(args):
     )
 
     # run LigandMPNN
+    logging.info(f"Running LigandMPNN on {len(backbones)} poses. Designing {args.num_mpnn_sequences} sequences per pose.")
     ligand_mpnn = protslurm.tools.ligandmpnn.LigandMPNN(jobstarter = gpu_jobstarter)
     backbones = ligand_mpnn.run(
         poses = backbones,
@@ -269,6 +282,7 @@ def main(args):
     )
 
     # predict with ESMFold
+    logging.info(f"LigandMPNN finished, now predicting {len(backbones)} sequences using ESMFold.")
     esmfold = protslurm.tools.esmfold.ESMFold(jobstarter = real_gpu_jobstarter)
     backbones = esmfold.run(
         poses = backbones,
@@ -276,20 +290,23 @@ def main(args):
     )
 
     # calculate RMSD (backbone, motif, fixedres)
+    logging.info(f"Prediction of {len(backbones)} sequences completed. Calculating RMSDs to rfdiffusion backbone and reference fragment.")
     backbones = catres_motif_rmsd.calc_rmsd(poses = backbones, prefix = "esm_catres_heavy")
     backbones = catres_motif_rmsd.calc_rmsd(poses = backbones, prefix = "esm_catres_bb", atoms=["CA", "C", "N"])
     backbones = rfdiffusion_bb_rmsd.calc_rmsd(poses = backbones, prefix = "esm_backbone")
 
     # calculate TM-Score and get sc-tm score:
+    logging.info(f"Calculating TM-Score between backbone and prediction using TM-Align.")
     tm_score_calculator = protslurm.tools.metrics.tmscore.TMalign(jobstarter = small_cpu_jobstarter)
     tm_score_calculator.run(
         poses = backbones,
         prefix = "esm_tm",
-        ref_col = "rfdiffusion_location",
-        overwrite = False 
+        ref_col = "channel_removed_location",
+        overwrite = False
     )
 
     # run rosetta_script to evaluate residuewiese energy
+    logging.info(f"TMAlign finished. Now relaxing {len(backbones)} structures with Rosetta fastrelax at 5 relax runs per pose.")
     rosetta = protslurm.tools.rosetta.Rosetta(jobstarter = cpu_jobstarter)
     rosetta.run(
         poses = backbones,
@@ -309,6 +326,7 @@ def main(args):
     )
 
     # add back ligand and determine pocket-ness!
+    logging.info(f"Rosetta Relax finished. Now adding Ligand back into the structure for ligand-based pocket prediction.")
     chain_adder.superimpose_add_chain(
         poses = backbones,
         prefix = "post_prediction_ligand",
@@ -317,6 +335,7 @@ def main(args):
         copy_chain = args.ligand_chain
     )
 
+    logging.info(f"Detecting pockets using fpocket on {len(backbones)} backbones.")
     fpocket_runner = protslurm.tools.metrics.fpocket.FPocket(jobstarter=cpu_jobstarter)
     fpocket_runner.run(
         poses = backbones,
@@ -325,6 +344,7 @@ def main(args):
     )
 
     # plot outputs
+    logging.info(f"FPocket completed, plotting outputs.")
     cols = [
         "rfdiffusion_catres_rmsd",
         "esm_plddt",
@@ -381,35 +401,46 @@ def main(args):
 
     # filter poses by values:
     backbones.filter_poses_by_value(score_col="esm_plddt", value=75, operator=">=")
-    backbones.filter_poses_by_value(score_col="esm_backbone_rmsd", value=2, operator="<=")
+    backbones.filter_poses_by_value(score_col="esm_backbone_rmsd", value=1.5, operator="<=")
+    backbones.filter_poses_by_value(score_col="esm_catres_bb_rmsd", value=1.5, operator="<=")
 
     # calculate multi-scoerterm score for the final backbone filter:
     backbones.calculate_composite_score(
         name="design_composite_score",
-        scoreterms=["esm_plddt", "esm_backbone_rmsd", "esm_catres_bb_rmsd", "esm_catres_heavy_rmsd"],
-        weights=[0.2, 0.2, 0.4, 0.4],
+        scoreterms=["esm_plddt", "esm_tm_TM_score_ref", "esm_catres_bb_rmsd", "esm_catres_heavy_rmsd"],
+        weights=[-0.1, -0.2, 0.4, 0.4],
         plot=True
     )
 
+    # filter down to rfdiffusion backbones
     backbones.filter_poses_by_rank(
-        n=25,
+        n=1,
         score_col="design_composite_score",
         prefix="final_backbone_filter",
-        plot=True
+        plot=True,
+        remove_layers=2
     )
 
+    # calculate fraction of (design-successful) backbones where pocket was identified using fpocket.
+    pocket_containing_fraction = backbones.df["postrelax_top_volumn"].count() / len(backbones)
+    logging.info(f"Fraction of RFdiffusion design-successful backbones that contain active-site pocket: {pocket_containing_fraction}")
 
     # copy filtered poses to new location
     results_dir = backbones.work_dir + "/results/"
+    pockets_dir = f"{results_dir}/pocket_pdbs"
     backbones.save_poses(out_path=results_dir)
     backbones.save_poses(out_path=results_dir, poses_col="input_poses")
     backbones.save_scores(out_path=results_dir)
+    
+    #TODO: implement pocket location saving.
+    backbones.save_poses(out_path=pockets_dir, poses_col="postrelax_pocket_location")
 
     # write pymol alignment script?
+    logging.info(f"Created results/ folder and writing pymol alignment script for best backbones at {results_dir}")
     _ = write_pymol_alignment_script(
         df=backbones.df,
         scoreterm="design_composite_score",
-        top_n=25,
+        top_n=len(backbones),
         path_to_script=f"{results_dir}/align_results.pml",
         ref_motif_col = "template_fixedres",
         target_motif_col = "fixed_residues",
