@@ -289,7 +289,7 @@ def main(args):
         overwrite = True
     )
 
-    # run rosetta_script to evaluate residuewiese energy
+    # run rosetta_script to evaluate residue-wise energy
     rosetta = protslurm.tools.rosetta.Rosetta(jobstarter = cpu_jobstarter)
     rosetta.run(
         poses = backbones,

@@ -344,6 +344,7 @@ def check_for_chain_in_pose(pose: Bio.PDB.Structure.Structure, chain:str):
     else: raise KeyError(f"Chain {chain} not found in pose {pose.id}")
 
 def rotation_matrix_from_vectors(A, B):
+    '''Creates rotation matrix from vectors.'''
     A_normalized = A / np.linalg.norm(A)
     B_normalized = B / np.linalg.norm(B)
 
