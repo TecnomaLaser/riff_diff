@@ -268,6 +268,7 @@ def main(args):
         fixed_res_col = "fixed_residues"
     )
 
+    print(f"pre-esmfold, {backbones.poses_list()[0]}")
     # predict with ESMFold
     esmfold = protslurm.tools.esmfold.ESMFold(jobstarter = real_gpu_jobstarter)
     backbones = esmfold.run(
@@ -280,15 +281,17 @@ def main(args):
     backbones = catres_motif_rmsd.calc_rmsd(poses = backbones, prefix = "esm_catres_bb", atoms=["CA", "C", "N"])
     backbones = rfdiffusion_bb_rmsd.calc_rmsd(poses = backbones, prefix = "esm_backbone")
 
+    print(f"pre-tm-score, {backbones.poses_list()[0]}")
     # calculate TM-Score and get sc-tm score:
     tm_score_calculator = protslurm.tools.metrics.tmscore.TMalign(jobstarter = small_cpu_jobstarter)
     tm_score_calculator.run(
         poses = backbones,
         prefix = "esm_tm",
         ref_col = "rfdiffusion_location",
-        overwrite = True
+        overwrite = False 
     )
 
+    print(f"pre-relax, {backbones.poses_list()[0]}")
     # run rosetta_script to evaluate residuewiese energy
     rosetta = protslurm.tools.rosetta.Rosetta(jobstarter = cpu_jobstarter)
     rosetta.run(
@@ -308,6 +311,8 @@ def main(args):
         plot = True
     )
 
+    print(f"pre-chain, {backbones.poses_list()[0]}")
+
     # add back ligand and determine pocket-ness!
     chain_adder.superimpose_add_chain(
         poses = backbones,
@@ -317,12 +322,15 @@ def main(args):
         copy_chain = args.ligand_chain
     )
 
+    print(f"pre-fpocket, {backbones.poses_list()[0]}")
     fpocket_runner = protslurm.tools.metrics.fpocket.FPocket(jobstarter=cpu_jobstarter)
     fpocket_runner.run(
         poses = backbones,
         prefix = "postrelax",
         options = f"--chain_as_ligand {args.ligand_chain}"
     )
+
+    print(f"post-fpocket, {backbones.poses_list()[0]}")
 
     # plot outputs
     cols = [
@@ -390,6 +398,7 @@ def main(args):
         weights=[0.2, 0.2, 0.4, 0.4],
         plot=True
     )
+    print(f"prefilter, {backbones.poses_list()[0]}")
 
     backbones.filter_poses_by_rank(
         n=25,
@@ -397,6 +406,8 @@ def main(args):
         prefix="final_backbone_filter",
         plot=True
     )
+
+    print(backbones.poses_list()[0])
 
     # copy filtered poses to new location
     results_dir = backbones.work_dir + "/results/"
