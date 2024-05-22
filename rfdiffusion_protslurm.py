@@ -286,10 +286,10 @@ def main(args):
         poses = backbones,
         prefix = "esm_tm",
         ref_col = "rfdiffusion_location",
-        overwrite = True
+        overwrite = False 
     )
 
-    # run rosetta_script to evaluate residue-wise energy
+    # run rosetta_script to evaluate residuewiese energy
     rosetta = protslurm.tools.rosetta.Rosetta(jobstarter = cpu_jobstarter)
     rosetta.run(
         poses = backbones,
@@ -397,6 +397,7 @@ def main(args):
         prefix="final_backbone_filter",
         plot=True
     )
+
 
     # copy filtered poses to new location
     results_dir = backbones.work_dir + "/results/"
