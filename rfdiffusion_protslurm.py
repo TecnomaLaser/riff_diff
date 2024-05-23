@@ -138,6 +138,7 @@ def replace_number_with_10(input_string):
 
 def main(args):
     '''executes everyting (duh)'''
+    ################################################# INPUT PREP #########################################################
     # logging and checking of inputs
     if not os.path.isdir(args.input_dir):
         raise ValueError(f"Not a directory: {args.input_dir}.")
@@ -209,6 +210,7 @@ def main(args):
     # load channel_contig
     backbones.df["rfdiffusion_pose_opts"] = backbones.df["rfdiffusion_pose_opts"].str.replace("contigmap.contigs=[", f"contigmap.contigs=[{args.channel_contig}/0 ")
 
+    ############################################## RFDiffusion ######################################################
     # run diffusion
     logging.info(f"Running RFDiffusion on {len(backbones)} poses with {args.num_rfdiffusions} diffusions per pose.")
     diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale=5 inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:substrate_contacts,weight:0\\',\\'type:custom_ROG,weight:{args.rog_weight}\\',\\'type:custom_recenter,weight:{args.decentralize_weight},distance:{args.decentralize_distance}{recenter}\\'] potentials.guide_decay=quadratic"
@@ -270,6 +272,18 @@ def main(args):
         copy_chain = args.ligand_chain
     )
 
+    # plot rfdiffusion_stats
+    results_dir = backbones.work_dir + "/results/"
+    plots.violinplot_multiple_cols(
+        df = backbones.df,
+        cols = ["rfdiffusion_catres_rmsd", "rfdiffusion_rog", "rfdiffusion_plddt"],
+        titles = ["Template RMSD", "ROG", "RFdiffusion pLDDT"],
+        y_labels = ["RMSD [\u00C5]", "ROG [\u00C5]", "pLDDT"],
+        dims = [(0,5), (0,30), (0,100)],
+        out_path = f"{results_dir}/rfdiffusion_statistics.png"
+    )
+
+    ############################################# SEQUENCE DESIGN ########################################################
     # run LigandMPNN
     logging.info(f"Running LigandMPNN on {len(backbones)} poses. Designing {args.num_mpnn_sequences} sequences per pose.")
     ligand_mpnn = protslurm.tools.ligandmpnn.LigandMPNN(jobstarter = gpu_jobstarter)
@@ -426,7 +440,6 @@ def main(args):
     logging.info(f"Fraction of RFdiffusion design-successful backbones that contain active-site pocket: {pocket_containing_fraction}")
 
     # copy filtered poses to new location
-    results_dir = backbones.work_dir + "/results/"
     pockets_dir = f"{results_dir}/pocket_pdbs"
     backbones.save_poses(out_path=results_dir)
     backbones.save_poses(out_path=results_dir, poses_col="input_poses")
@@ -489,7 +502,6 @@ if __name__ == "__main__":
 
     # fastrelax
     argparser.add_argument("--fastrelax_script", type=str, default=f"{protslurm.config.AUXILIARY_RUNNER_SCRIPTS_DIR}/fastrelax_sap.xml", help="Specify path to fastrelax script that you would like to use.")
-
     arguments = argparser.parse_args()
 
     main(arguments)
