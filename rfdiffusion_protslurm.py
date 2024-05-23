@@ -431,8 +431,8 @@ def main(args):
     backbones.save_poses(out_path=results_dir)
     backbones.save_poses(out_path=results_dir, poses_col="input_poses")
     backbones.save_scores(out_path=results_dir)
-    
-    #TODO: implement pocket location saving.
+
+    # save pocket structures
     backbones.save_poses(out_path=pockets_dir, poses_col="postrelax_pocket_location")
 
     # write pymol alignment script?
