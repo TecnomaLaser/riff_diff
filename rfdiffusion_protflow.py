@@ -1,4 +1,4 @@
-#!/home/mabr3112/anaconda3/envs/protslurm/bin/python
+#!/home/mabr3112/anaconda3/envs/protflow/bin/python
 '''
 Script to run RFdiffusion active-site model on artificial motif libraries.
 '''
@@ -11,30 +11,30 @@ import sys
 # dependency
 import pandas as pd
 import matplotlib
-import protslurm
-import protslurm.config
-from protslurm.jobstarters import SbatchArrayJobstarter
-import protslurm.residues
-import protslurm.tools
-import protslurm.tools.colabfold
-import protslurm.tools.esmfold
-import protslurm.tools.ligandmpnn
-import protslurm.tools.metrics.rmsd
-import protslurm.tools.metrics.tmscore
-import protslurm.tools.metrics.fpocket
-import protslurm.tools.protein_edits
-import protslurm.tools.rfdiffusion
-from protslurm.tools.metrics.rmsd import BackboneRMSD, MotifRMSD
-import protslurm.tools.rosetta
-from protslurm.utils.biopython_tools import renumber_pdb_by_residue_mapping
-import protslurm.utils.plotting as plots
-from protslurm.utils.metrics import calc_rog_of_pdb
+import protflow
+import protflow.config
+from protflow.jobstarters import SbatchArrayJobstarter
+import protflow.residues
+import protflow.tools
+import protflow.tools.colabfold
+import protflow.tools.esmfold
+import protflow.tools.ligandmpnn
+import protflow.tools.metrics.rmsd
+import protflow.tools.metrics.tmscore
+import protflow.tools.metrics.fpocket
+import protflow.tools.protein_edits
+import protflow.tools.rfdiffusion
+from protflow.tools.metrics.rmsd import BackboneRMSD, MotifRMSD
+import protflow.tools.rosetta
+from protflow.utils.biopython_tools import renumber_pdb_by_residue_mapping
+import protflow.utils.plotting as plots
+from protflow.utils.metrics import calc_rog_of_pdb
 
 # custom
 
 # local
 sys.path.append("/home/mabr3112/riff_diff/")
-from utils.pymol_tools_protslurm import write_pymol_alignment_script
+from utils.pymol_tools_protflow import write_pymol_alignment_script
 
 
 if __file__.startswith("/home/mabr3112"):
@@ -100,7 +100,7 @@ def overwrite_linker_length(pose_opts: str, total_length:int, max_linker_length:
 def update_and_copy_reference_frags(input_df: pd.DataFrame, ref_col:str, desc_col:str, prefix: str, out_pdb_path=None, keep_ligand_chain:str="") -> list[str]:
     '''Updates reference fragments (input_pdbs) to the motifs that were set during diffusion.'''
     # create residue mappings {old: new} for renaming
-    list_of_mappings = [protslurm.tools.rfdiffusion.get_residue_mapping(ref_motif, inp_motif) for ref_motif, inp_motif in zip(input_df[f"{prefix}_con_ref_pdb_idx"].to_list(), input_df[f"{prefix}_con_hal_pdb_idx"].to_list())]
+    list_of_mappings = [protflow.tools.rfdiffusion.get_residue_mapping(ref_motif, inp_motif) for ref_motif, inp_motif in zip(input_df[f"{prefix}_con_ref_pdb_idx"].to_list(), input_df[f"{prefix}_con_hal_pdb_idx"].to_list())]
 
     # compile list of output filenames
     output_pdb_names_list = [f"{out_pdb_path}/{desc}.pdb" for desc in input_df[desc_col].to_list()]
@@ -108,7 +108,7 @@ def update_and_copy_reference_frags(input_df: pd.DataFrame, ref_col:str, desc_co
     # renumber
     return [renumber_pdb_by_residue_mapping(ref_frag, res_mapping, out_pdb_path=pdb_output, keep_chain=keep_ligand_chain) for ref_frag, res_mapping, pdb_output in zip(input_df[ref_col].to_list(), list_of_mappings, output_pdb_names_list)]
 
-def active_site_pose_opts(input_opt: str, motif: protslurm.residues.ResidueSelection) -> str:
+def active_site_pose_opts(input_opt: str, motif: protflow.residues.ResidueSelection) -> str:
     '''Converts rfdiffusion_pose_opts string from default model to pose_opts string for active_site model (removes inpaint_seq and stuff.)'''
     def re_split_rfdiffusion_opts(command: str) -> list:
         if command is None:
@@ -145,12 +145,12 @@ def main(args):
     if not os.path.isdir(args.output_dir):
         os.makedirs(args.output_dir, exist_ok=True)
     logging.basicConfig(
-        filename=f'{args.output_dir}/rfdiffusion_protslurm_log.txt',
+        filename=f'{args.output_dir}/rfdiffusion_protflow_log.txt',
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
 
-    logging.info(f"\n{'#'*50}\nRunning rfdiffusion_protslurm.py on {args.input_dir}\n{'#'*50}\n")
+    logging.info(f"\n{'#'*50}\nRunning rfdiffusion_protflow.py on {args.input_dir}\n{'#'*50}\n")
 
     # format path_df to be a DF readable by Poses class
     logging.info(f"Parsing inputs specified at {args.input_dir}")
@@ -161,7 +161,7 @@ def main(args):
     input_df.to_json((path_df := f"{args.output_dir}/paths.poses.json"))
 
     # load poses
-    backbones = protslurm.poses.load_poses(path_df)
+    backbones = protflow.poses.load_poses(path_df)
     backbones.set_work_dir(args.output_dir)
 
     # setup jobstarters
@@ -181,8 +181,8 @@ def main(args):
     backbones.df["rfdiffusion_pose_opts"] = [overwrite_linker_length(pose_opts, total_length, linker_length) for pose_opts in backbones.df["rfdiffusion_pose_opts"].to_list()]
 
     # convert motifs from dict to ResidueSelection
-    backbones.df["fixed_residues"] = [protslurm.residues.from_dict(motif) for motif in backbones.df["fixed_residues"].to_list()]
-    backbones.df["motif_residues"] = [protslurm.residues.from_dict(motif) for motif in backbones.df["motif_residues"].to_list()]
+    backbones.df["fixed_residues"] = [protflow.residues.from_dict(motif) for motif in backbones.df["fixed_residues"].to_list()]
+    backbones.df["motif_residues"] = [protflow.residues.from_dict(motif) for motif in backbones.df["motif_residues"].to_list()]
 
     # set motif_cols to keep after rfdiffusion:
     motif_cols = ["fixed_residues"]
@@ -214,7 +214,7 @@ def main(args):
     # run diffusion
     logging.info(f"Running RFDiffusion on {len(backbones)} poses with {args.num_rfdiffusions} diffusions per pose.")
     diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale=5 inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:substrate_contacts,weight:0\\',\\'type:custom_ROG,weight:{args.rog_weight}\\',\\'type:custom_recenter,weight:{args.decentralize_weight},distance:{args.decentralize_distance}{recenter}\\'] potentials.guide_decay=quadratic"
-    rfdiffusion = protslurm.tools.rfdiffusion.RFdiffusion(jobstarter = gpu_jobstarter)
+    rfdiffusion = protflow.tools.rfdiffusion.RFdiffusion(jobstarter = gpu_jobstarter)
     backbones = rfdiffusion.run(
         poses=backbones,
         prefix="rfdiffusion",
@@ -226,7 +226,7 @@ def main(args):
 
     # remove channel chain (chain B)
     logging.info(f"Diffusion completed, removing channel chain from diffusion outputs.")
-    chain_remover = protslurm.tools.protein_edits.ChainRemover(jobstarter = small_cpu_jobstarter)
+    chain_remover = protflow.tools.protein_edits.ChainRemover(jobstarter = small_cpu_jobstarter)
     chain_remover.remove_chains(
         poses = backbones,
         prefix = "channel_removed",
@@ -263,7 +263,7 @@ def main(args):
 
     # add back the ligand:
     logging.info(f"Metrics calculated, now adding Ligand chain back into backbones.")
-    chain_adder = protslurm.tools.protein_edits.ChainAdder(jobstarter = cpu_jobstarter)
+    chain_adder = protflow.tools.protein_edits.ChainAdder(jobstarter = cpu_jobstarter)
     chain_adder.superimpose_add_chain(
         poses = backbones,
         prefix = "post_rfdiffusion_ligand",
@@ -286,7 +286,7 @@ def main(args):
     ############################################# SEQUENCE DESIGN ########################################################
     # run LigandMPNN
     logging.info(f"Running LigandMPNN on {len(backbones)} poses. Designing {args.num_mpnn_sequences} sequences per pose.")
-    ligand_mpnn = protslurm.tools.ligandmpnn.LigandMPNN(jobstarter = gpu_jobstarter)
+    ligand_mpnn = protflow.tools.ligandmpnn.LigandMPNN(jobstarter = gpu_jobstarter)
     backbones = ligand_mpnn.run(
         poses = backbones,
         prefix = "postdiffusion_ligandmpnn",
@@ -297,7 +297,7 @@ def main(args):
 
     # predict with ESMFold
     logging.info(f"LigandMPNN finished, now predicting {len(backbones)} sequences using ESMFold.")
-    esmfold = protslurm.tools.esmfold.ESMFold(jobstarter = real_gpu_jobstarter)
+    esmfold = protflow.tools.esmfold.ESMFold(jobstarter = real_gpu_jobstarter)
     backbones = esmfold.run(
         poses = backbones,
         prefix = "esm",
@@ -311,7 +311,7 @@ def main(args):
 
     # calculate TM-Score and get sc-tm score:
     logging.info(f"Calculating TM-Score between backbone and prediction using TM-Align.")
-    tm_score_calculator = protslurm.tools.metrics.tmscore.TMalign(jobstarter = small_cpu_jobstarter)
+    tm_score_calculator = protflow.tools.metrics.tmscore.TMalign(jobstarter = small_cpu_jobstarter)
     tm_score_calculator.run(
         poses = backbones,
         prefix = "esm_tm",
@@ -321,7 +321,7 @@ def main(args):
 
     # run rosetta_script to evaluate residuewiese energy
     logging.info(f"TMAlign finished. Now relaxing {len(backbones)} structures with Rosetta fastrelax at 5 relax runs per pose.")
-    rosetta = protslurm.tools.rosetta.Rosetta(jobstarter = cpu_jobstarter)
+    rosetta = protflow.tools.rosetta.Rosetta(jobstarter = cpu_jobstarter)
     rosetta.run(
         poses = backbones,
         prefix = "fastrelax",
@@ -350,7 +350,7 @@ def main(args):
     )
 
     logging.info(f"Detecting pockets using fpocket on {len(backbones)} backbones.")
-    fpocket_runner = protslurm.tools.metrics.fpocket.FPocket(jobstarter=cpu_jobstarter)
+    fpocket_runner = protflow.tools.metrics.fpocket.FPocket(jobstarter=cpu_jobstarter)
     fpocket_runner.run(
         poses = backbones,
         prefix = "postrelax",
@@ -502,7 +502,7 @@ if __name__ == "__main__":
     argparser.add_argument("--num_mpnn_sequences", type=int, default=8, help="How many LigandMPNN sequences do you want to design after RFdiffusion?")
 
     # fastrelax
-    argparser.add_argument("--fastrelax_script", type=str, default=f"{protslurm.config.AUXILIARY_RUNNER_SCRIPTS_DIR}/fastrelax_sap.xml", help="Specify path to fastrelax script that you would like to use.")
+    argparser.add_argument("--fastrelax_script", type=str, default=f"{protflow.config.AUXILIARY_RUNNER_SCRIPTS_DIR}/fastrelax_sap.xml", help="Specify path to fastrelax script that you would like to use.")
     arguments = argparser.parse_args()
 
     main(arguments)
