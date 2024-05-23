@@ -422,7 +422,7 @@ def main(args):
     )
 
     # calculate fraction of (design-successful) backbones where pocket was identified using fpocket.
-    pocket_containing_fraction = backbones.df["postrelax_top_volumn"].count() / len(backbones)
+    pocket_containing_fraction = backbones.df["postrelax_top_volume"].count() / len(backbones)
     logging.info(f"Fraction of RFdiffusion design-successful backbones that contain active-site pocket: {pocket_containing_fraction}")
 
     # copy filtered poses to new location
