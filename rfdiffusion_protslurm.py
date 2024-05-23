@@ -340,7 +340,8 @@ def main(args):
     fpocket_runner.run(
         poses = backbones,
         prefix = "postrelax",
-        options = f"--chain_as_ligand {args.ligand_chain}"
+        options = f"--chain_as_ligand {args.ligand_chain}",
+        overwrite = True
     )
 
     # plot outputs
