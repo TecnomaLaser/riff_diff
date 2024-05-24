@@ -7,7 +7,7 @@
 
 # dependencies
 import pandas as pd
-from protslurm.residues import ResidueSelection
+from protflow.residues import ResidueSelection
 
 def write_pymol_alignment_script(df:pd.DataFrame, scoreterm: str, top_n:int, path_to_script: str, ascending=True, use_original_location=False,
                                  ref_motif_col: str = "template_motif", target_motif_col: str = "motif_residues",
