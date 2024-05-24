@@ -274,12 +274,14 @@ def main(args):
 
     # plot rfdiffusion_stats
     results_dir = backbones.work_dir + "/results/"
+    if not os.path.isdir(results_dir):
+        os.makedirs(results_dir, exist_ok=True)
     plots.violinplot_multiple_cols(
         df = backbones.df,
         cols = ["rfdiffusion_catres_rmsd", "rfdiffusion_rog", "rfdiffusion_plddt"],
         titles = ["Template RMSD", "ROG", "RFdiffusion pLDDT"],
         y_labels = ["RMSD [\u00C5]", "ROG [\u00C5]", "pLDDT"],
-        dims = [(0,5), (0,30), (0,100)],
+        dims = [(0,5), (0,30), (0,1)],
         out_path = f"{results_dir}/rfdiffusion_statistics.png"
     )
 
