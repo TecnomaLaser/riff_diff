@@ -97,7 +97,7 @@ def overwrite_linker_length(pose_opts: str, total_length:int, max_linker_length:
     # return replaced contig pose-opts:
     return pose_opts.replace(full_contig_str, f"{new_contig_str} contigmap.length={str(total_length)}-{str(total_length)} ")
 
-def update_and_copy_reference_frags(input_df: pd.DataFrame, ref_col:str, desc_col:str, prefix: str, out_pdb_path=None, keep_ligand_chain:str="") -> list[str]:
+def update_and_copy_reference_frags(input_df: pd.DataFrame, ref_col:str, desc_col:str, prefix: str, out_pdb_path=None, keep_ligand_chain:str="") -> "list[str]":
     '''Updates reference fragments (input_pdbs) to the motifs that were set during diffusion.'''
     # create residue mappings {old: new} for renaming
     list_of_mappings = [protflow.tools.rfdiffusion.get_residue_mapping(ref_motif, inp_motif) for ref_motif, inp_motif in zip(input_df[f"{prefix}_con_ref_pdb_idx"].to_list(), input_df[f"{prefix}_con_hal_pdb_idx"].to_list())]
@@ -108,7 +108,7 @@ def update_and_copy_reference_frags(input_df: pd.DataFrame, ref_col:str, desc_co
     # renumber
     return [renumber_pdb_by_residue_mapping(ref_frag, res_mapping, out_pdb_path=pdb_output, keep_chain=keep_ligand_chain) for ref_frag, res_mapping, pdb_output in zip(input_df[ref_col].to_list(), list_of_mappings, output_pdb_names_list)]
 
-def active_site_pose_opts(input_opt: str, motif: protflow.residues.ResidueSelection) -> str:
+def active_site_pose_opts(input_opt: str, motif: protflow.residues.ResidueSelection, as_model_path: str) -> str:
     '''Converts rfdiffusion_pose_opts string from default model to pose_opts string for active_site model (removes inpaint_seq and stuff.)'''
     def re_split_rfdiffusion_opts(command: str) -> list:
         if command is None:
@@ -127,6 +127,7 @@ def active_site_pose_opts(input_opt: str, motif: protflow.residues.ResidueSelect
 
     # remerge contig into opts_l and return concatenated opts:
     opts_l[0] = contig
+    opts_l.append("inference.ckpt_override_path={as_model_path}")
     return " ".join(opts_l)
 
 def replace_number_with_10(input_string):
@@ -155,7 +156,7 @@ def main(args):
     # format path_df to be a DF readable by Poses class
     logging.info(f"Parsing inputs specified at {args.input_dir}")
     input_df = pd.read_json(f"{args.input_dir}/selected_paths.json", typ="frame")
-    input_df = input_df.reset_index().rename(columns={"index": "poses_description"})
+    input_df = input_df.reset_index().rename(columns={"index": "poses_description"}) # pylint: disable=E1101
     input_df["poses"] = f"{args.input_dir}/pdb_in/" + input_df["poses_description"] + ".pdb"
     input_df["input_poses"] = input_df["poses"]
     input_df.to_json((path_df := f"{args.output_dir}/paths.poses.json"))
@@ -205,7 +206,7 @@ def main(args):
     # change pose_opts according to model being used:
     if args.model == "active_site":
         logging.info("Using Active Site Model. Changing contig strings from pose_options.")
-        backbones.df["rfdiffusion_pose_opts"] = [active_site_pose_opts(row["rfdiffusion_pose_opts"], row["template_fixedres"]) for row in backbones]
+        backbones.df["rfdiffusion_pose_opts"] = [active_site_pose_opts(row["rfdiffusion_pose_opts"], row["template_fixedres"], as_model_path=args.as_model_path) for row in backbones]
 
     # load channel_contig
     backbones.df["rfdiffusion_pose_opts"] = backbones.df["rfdiffusion_pose_opts"].str.replace("contigmap.contigs=[", f"contigmap.contigs=[{args.channel_contig}/0 ")
@@ -302,7 +303,7 @@ def main(args):
     esmfold = protflow.tools.esmfold.ESMFold(jobstarter = real_gpu_jobstarter)
     backbones = esmfold.run(
         poses = backbones,
-        prefix = "esm",
+        prefix = "esm"
     )
 
     # calculate RMSD (backbone, motif, fixedres)
@@ -488,6 +489,7 @@ if __name__ == "__main__":
     argparser.add_argument("--max_cpus", type=int, default=1000, help="How many cpus do you want to use at once?")
 
     # rfdiffusion optionals
+    argparser.add_argument("--as_model_path", type=str, default="/home/mabr3112/RFdiffusion/models/ActiveSite_ckpt.pt")
     argparser.add_argument("--num_rfdiffusions", type=int, default=10, help="Number of backbones to generate per input path.")
     argparser.add_argument("--recenter", type=str, default=None, help="Point (xyz) in input pdb towards the diffusion should be recentered. Set strength of recentering with --decentralize_distance. example: --recenter=-13.123;34.84;2.3209")
     argparser.add_argument("--decentralize_distance", type=float, default=20, help="Default Distance to decentralize from diffusion center. Default direction of decentralization is away from the substrate.")
