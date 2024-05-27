@@ -127,7 +127,7 @@ def active_site_pose_opts(input_opt: str, motif: protflow.residues.ResidueSelect
 
     # remerge contig into opts_l and return concatenated opts:
     opts_l[0] = contig
-    opts_l.append("inference.ckpt_override_path={as_model_path}")
+    opts_l.append(f"inference.ckpt_override_path={as_model_path}")
     return " ".join(opts_l)
 
 def replace_number_with_10(input_string):
