@@ -19,12 +19,12 @@ import protflow.tools
 import protflow.tools.colabfold
 import protflow.tools.esmfold
 import protflow.tools.ligandmpnn
-import protflow.tools.metrics.rmsd
-import protflow.tools.metrics.tmscore
-import protflow.tools.metrics.fpocket
+import protflow.metrics.rmsd
+import protflow.metrics.tmscore
+import protflow.metrics.fpocket
 import protflow.tools.protein_edits
 import protflow.tools.rfdiffusion
-from protflow.tools.metrics.rmsd import BackboneRMSD, MotifRMSD
+from protflow.metrics.rmsd import BackboneRMSD, MotifRMSD
 import protflow.tools.rosetta
 from protflow.utils.biopython_tools import renumber_pdb_by_residue_mapping
 import protflow.utils.plotting as plots
@@ -127,7 +127,7 @@ def active_site_pose_opts(input_opt: str, motif: protflow.residues.ResidueSelect
 
     # remerge contig into opts_l and return concatenated opts:
     opts_l[0] = contig
-    opts_l.append("inference.ckpt_override_path={as_model_path}")
+    opts_l.append(f"inference.ckpt_override_path={as_model_path}")
     return " ".join(opts_l)
 
 def replace_number_with_10(input_string):
@@ -278,7 +278,7 @@ def main(args):
     if not os.path.isdir(results_dir):
         os.makedirs(results_dir, exist_ok=True)
     plots.violinplot_multiple_cols(
-        df = backbones.df,
+        dataframe = backbones.df,
         cols = ["rfdiffusion_catres_rmsd", "rfdiffusion_rog", "rfdiffusion_plddt"],
         titles = ["Template RMSD", "ROG", "RFdiffusion pLDDT"],
         y_labels = ["RMSD [\u00C5]", "ROG [\u00C5]", "pLDDT"],
@@ -353,7 +353,7 @@ def main(args):
     )
 
     logging.info(f"Detecting pockets using fpocket on {len(backbones)} backbones.")
-    fpocket_runner = protflow.tools.metrics.fpocket.FPocket(jobstarter=cpu_jobstarter)
+    fpocket_runner = protflow.metrics.fpocket.FPocket(jobstarter=cpu_jobstarter)
     fpocket_runner.run(
         poses = backbones,
         prefix = "postrelax",
@@ -409,7 +409,7 @@ def main(args):
 
     # plot results
     plots.violinplot_multiple_cols(
-        df = backbones.df,
+        dataframe = backbones.df,
         cols = cols,
         titles = titles,
         y_labels = y_labels,
@@ -460,13 +460,12 @@ def main(args):
         top_n=len(backbones),
         path_to_script=f"{results_dir}/align_results.pml",
         ref_motif_col = "template_fixedres",
-        target_motif_col = "fixed_residues",
         ref_catres_col = "template_fixedres",
         target_catres_col = "fixed_residues"
     )
 
     plots.violinplot_multiple_cols(
-        df = backbones.df,
+        dataframe = backbones.df,
         cols = cols,
         titles = titles,
         y_labels = y_labels,
