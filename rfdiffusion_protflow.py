@@ -209,12 +209,16 @@ def main(args):
         backbones.df["rfdiffusion_pose_opts"] = [active_site_pose_opts(row["rfdiffusion_pose_opts"], row["template_fixedres"], as_model_path=args.as_model_path) for row in backbones]
 
     # load channel_contig
-    backbones.df["rfdiffusion_pose_opts"] = backbones.df["rfdiffusion_pose_opts"].str.replace("contigmap.contigs=[", f"contigmap.contigs=[{args.channel_contig}/0 ")
+    if args.channel_contig != "None":
+        backbones.df["rfdiffusion_pose_opts"] = backbones.df["rfdiffusion_pose_opts"].str.replace("contigmap.contigs=[", f"contigmap.contigs=[{args.channel_contig}/0 ")
 
     ############################################## RFDiffusion ######################################################
     # run diffusion
     logging.info(f"Running RFDiffusion on {len(backbones)} poses with {args.num_rfdiffusions} diffusions per pose.")
-    diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale=5 inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:substrate_contacts,weight:0\\',\\'type:custom_ROG,weight:{args.rog_weight}\\',\\'type:custom_recenter,weight:{args.decentralize_weight},distance:{args.decentralize_distance}{recenter}\\'] potentials.guide_decay=quadratic"
+    if args.model == "active_site":
+        diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale=5 inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:substrate_contacts,weight:{args.as_substrate_contacts_weight}\\',\\'type:custom_ROG,weight:{args.rog_weight}\\'] potentials.guide_decay=quadratic"
+    else:
+        diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale=5 inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:substrate_contacts,weight:0\\',\\'type:custom_ROG,weight:{args.rog_weight}\\',\\'type:custom_recenter,weight:{args.decentralize_weight},distance:{args.decentralize_distance}{recenter}\\'] potentials.guide_decay=quadratic"
     rfdiffusion = protflow.tools.rfdiffusion.RFdiffusion(jobstarter = gpu_jobstarter)
     backbones = rfdiffusion.run(
         poses=backbones,
@@ -505,6 +509,7 @@ if __name__ == "__main__":
     argparser.add_argument("--model", type=str, default="default", help="{default,active_site} Choose which model to use for RFdiffusion (active site or regular model).")
     argparser.add_argument("--channel_contig", type=str, default="Q1-21", help="RFdiffusion-style contig for chain B")
     argparser.add_argument("--decentralize_weight", type=float, default=15, help="Weight of decentralization potential for RFdiffusion.")
+    argparser.add_argument("--as_substrate_contacts_weight", type=float, default=0, help="Weight of default substrate_contacts potential in RFdiffusion.")
 
     # ligandmpnn optionals
     argparser.add_argument("--num_mpnn_sequences", type=int, default=8, help="How many LigandMPNN sequences do you want to design after RFdiffusion?")
