@@ -28,7 +28,7 @@ from protflow.metrics.rmsd import BackboneRMSD, MotifRMSD
 import protflow.tools.rosetta
 from protflow.utils.biopython_tools import renumber_pdb_by_residue_mapping
 import protflow.utils.plotting as plots
-from protflow.utils.metrics import calc_rog_of_pdb
+from protflow.utils.metrics import calc_rog_of_pdb, calc_ligand_clashes, calc_ligand_contacts
 
 # custom
 
@@ -256,7 +256,7 @@ def main(args):
     backbones.df["rfdiffusion_rog"] = [calc_rog_of_pdb(pose) for pose in backbones.poses_list()]
 
     # calculate motif_rmsd of RFdiffusion (for plotting later)
-    catres_motif_rmsd.calc_rmsd(
+    catres_motif_rmsd.run(
         poses = backbones,
         prefix = "rfdiffusion_catres",
         atoms = ["CA", "C", "N"]
@@ -273,16 +273,21 @@ def main(args):
         copy_chain = args.ligand_chain
     )
 
+    # calculate ligand stats
+    logging.info(f"Calculating Ligand Statistics")
+    backbones.df["rfdiffusion_ligand_contacts"] = [calc_ligand_contacts(pose, ligand_chain=args.ligand_chain, min_dist=3.5, max_dist=7.5, atoms=["CA"], excluded_elements=["H"]) for pose in backbones.poses_list()]
+    backbones.df["rfdiffusion_ligand_clashes"] = [calc_ligand_clashes(pose, ligand_chain=args.ligand_chain, dist=3) for pose in backbones.poses_list()]
+
     # plot rfdiffusion_stats
     results_dir = backbones.work_dir + "/results/"
     if not os.path.isdir(results_dir):
         os.makedirs(results_dir, exist_ok=True)
     plots.violinplot_multiple_cols(
         dataframe = backbones.df,
-        cols = ["rfdiffusion_catres_rmsd", "rfdiffusion_rog", "rfdiffusion_plddt"],
-        titles = ["Template RMSD", "ROG", "RFdiffusion pLDDT"],
-        y_labels = ["RMSD [\u00C5]", "ROG [\u00C5]", "pLDDT"],
-        dims = [(0,5), (0,30), (0,1)],
+        cols = ["rfdiffusion_catres_rmsd", "rfdiffusion_rog", "rfdiffusion_ligand_contacts", "rfdiffusion_ligand_clashes", "rfdiffusion_plddt"],
+        titles = ["Template RMSD", "ROG", "Ligand Contacts", "Ligand Clashes", "RFdiffusion pLDDT"],
+        y_labels = ["RMSD [\u00C5]", "ROG [\u00C5]", "#CA", "#Clashes", "pLDDT"],
+        dims = [(0,5), (0,30), None, None, (0.8,1)],
         out_path = f"{results_dir}/rfdiffusion_statistics.png"
     )
 
@@ -308,13 +313,13 @@ def main(args):
 
     # calculate RMSD (backbone, motif, fixedres)
     logging.info(f"Prediction of {len(backbones)} sequences completed. Calculating RMSDs to rfdiffusion backbone and reference fragment.")
-    backbones = catres_motif_rmsd.calc_rmsd(poses = backbones, prefix = "esm_catres_heavy")
-    backbones = catres_motif_rmsd.calc_rmsd(poses = backbones, prefix = "esm_catres_bb", atoms=["CA", "C", "N"])
-    backbones = rfdiffusion_bb_rmsd.calc_rmsd(poses = backbones, prefix = "esm_backbone")
+    backbones = catres_motif_rmsd.run(poses = backbones, prefix = "esm_catres_heavy")
+    backbones = catres_motif_rmsd.run(poses = backbones, prefix = "esm_catres_bb", atoms=["CA", "C", "N"])
+    backbones = rfdiffusion_bb_rmsd.run(poses = backbones, prefix = "esm_backbone")
 
     # calculate TM-Score and get sc-tm score:
     logging.info(f"Calculating TM-Score between backbone and prediction using TM-Align.")
-    tm_score_calculator = protflow.tools.metrics.tmscore.TMalign(jobstarter = small_cpu_jobstarter)
+    tm_score_calculator = protflow.metrics.tmscore.TMalign(jobstarter = small_cpu_jobstarter)
     tm_score_calculator.run(
         poses = backbones,
         prefix = "esm_tm",
