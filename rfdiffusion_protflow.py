@@ -3,12 +3,14 @@
 Script to run RFdiffusion active-site model on artificial motif libraries.
 '''
 #imports
+import json
 import logging
 import os
 import re
 import sys
 
 # dependency
+import numpy as np
 import pandas as pd
 import matplotlib
 import protflow
@@ -153,6 +155,9 @@ def main(args):
 
     logging.info(f"\n{'#'*50}\nRunning rfdiffusion_protflow.py on {args.input_dir}\n{'#'*50}\n")
 
+    # setup empty dictionary for all output metrics that should go into a separate DataFrame:
+    output_metrics = {"scTM_success": None, "baker_success": None, "fraction_ligand_clashes": None, "average_ligand_contacts": None, "fraction_ligand_contacts": None}
+
     # format path_df to be a DF readable by Poses class
     logging.info(f"Parsing inputs specified at {args.input_dir}")
     input_df = pd.read_json(f"{args.input_dir}/selected_paths.json", typ="frame")
@@ -228,6 +233,7 @@ def main(args):
         pose_options=backbones.df["rfdiffusion_pose_opts"].to_list(),
         update_motifs=motif_cols
     )
+    num_backbones = len(backbones)
 
     # remove channel chain (chain B)
     logging.info(f"Diffusion completed, removing channel chain from diffusion outputs.")
@@ -285,6 +291,11 @@ def main(args):
     backbones.df["rfdiffusion_ligand_contacts"] = [calc_ligand_contacts(pose, ligand_chain=args.ligand_chain, min_dist=3.5, max_dist=7.5, atoms=["CA"], excluded_elements=["H"]) for pose in backbones.poses_list()]
     backbones.df["rfdiffusion_ligand_clashes"] = [calc_ligand_clashes(pose, ligand_chain=args.ligand_chain, dist=3) for pose in backbones.poses_list()]
 
+    # collect ligand stats into output metrics:
+    output_metrics["average_ligand_contacts"] = float(np.nan_to_num(backbones.df[backbones.df["rfdiffusion_ligand_clashes"] < 1]["rfdiffusion_ligand_contacts"].mean()))
+    output_metrics["fraction_ligand_contacts"] = len(backbones.df[(backbones.df["rfdiffusion_ligand_clashes"] < 1) & (backbones.df["rfdiffusion_ligand_contacts"] > args.min_ligand_contacts)]) / num_backbones
+    output_metrics["fraction_ligand_clashes"] = len(backbones.df[backbones.df["rfdiffusion_ligand_contacts"] < 1]) / num_backbones
+
     # plot rfdiffusion_stats
     results_dir = backbones.work_dir + "/results/"
     if not os.path.isdir(results_dir):
@@ -299,7 +310,7 @@ def main(args):
         show_fig = False
     )
 
-    ############################################# SEQUENCE DESIGN ########################################################
+    ############################################# SEQUENCE DESIGN AND ESMFOLD ########################################################
     # run LigandMPNN
     logging.info(f"Running LigandMPNN on {len(backbones)} poses. Designing {args.num_mpnn_sequences} sequences per pose.")
     ligand_mpnn = protflow.tools.ligandmpnn.LigandMPNN(jobstarter = gpu_jobstarter)
@@ -319,7 +330,8 @@ def main(args):
         prefix = "esm"
     )
 
-    # calculate RMSD (backbone, motif, fixedres)
+    ################################################ METRICS ################################################################
+    # calculate RMSDs (backbone, motif, fixedres)
     logging.info(f"Prediction of {len(backbones)} sequences completed. Calculating RMSDs to rfdiffusion backbone and reference fragment.")
     backbones = catres_motif_rmsd.run(poses = backbones, prefix = "esm_catres_heavy")
     backbones = catres_motif_rmsd.run(poses = backbones, prefix = "esm_catres_bb", atoms=["CA", "C", "N"])
@@ -345,6 +357,16 @@ def main(args):
         nstruct = 5,
         options = f"-parser:protocol {args.fastrelax_script} -beta"
     )
+    backbones.df["perresidue_total_score"] = backbones.df["fastrelax"]
+
+    ############################################# BACKBONE FILTER ########################################################
+    # calculate multi-scoerterm score for the final backbone filter:
+    backbones.calculate_composite_score(
+        name="design_composite_score",
+        scoreterms=["esm_plddt", "esm_tm_TM_score_ref", "esm_catres_bb_rmsd", "esm_catres_heavy_rmsd"],
+        weights=[-0.1, -0.2, 0.4, 0.4],
+        plot=True
+    )
 
     # filter down after fastrelax
     backbones.filter_poses_by_rank(
@@ -353,6 +375,15 @@ def main(args):
         remove_layers = 1,
         prefix = "fastrelax_filter",
         plot = True
+    )
+
+    # filter down to rfdiffusion backbones
+    backbones.filter_poses_by_rank(
+        n=1,
+        score_col="design_composite_score",
+        prefix="rfdiffusion_backbone_filter",
+        plot=True,
+        remove_layers=2
     )
 
     # add back ligand and determine pocket-ness!
@@ -376,49 +407,10 @@ def main(args):
 
     # plot outputs
     logging.info(f"FPocket completed, plotting outputs.")
-    cols = [
-        "rfdiffusion_catres_rmsd",
-        "esm_plddt",
-        "esm_backbone_rmsd",
-        "esm_catres_heavy_rmsd",
-        "fastrelax_total_score",
-        "esm_tm_sc_tm",
-        "postrelax_top_druggability_score",
-        "postrelax_top_volume"
-    ]
-
-    titles = [
-        "RFDiffusion Motif\nBackbone RMSD",
-        "ESMFold pLDDT",
-        "ESMFold BB-Ca RMSD",
-        "ESMFold Sidechain\nRMSD",
-        "Rosetta total_score",
-        "SC-TM Score",
-        "FPocket\nDruggability",
-        "FPocket\nVolume"
-    ]
-
-    y_labels = [
-        "Angstrom",
-        "pLDDT",
-        "Angstrom",
-        "Angstrom",
-        "[REU]",
-        "TM Score",
-        "Druggability",
-        "Volume [AU]"
-    ]
-
-    dims = [
-        (0,8),
-        (0,100),
-        (0,8),
-        (0,8),
-        None,
-        (0,1),
-        None,
-        None
-    ]
+    cols = ["rfdiffusion_catres_rmsd", "esm_plddt", "esm_backbone_rmsd", "esm_catres_heavy_rmsd", "fastrelax_total_score", "esm_tm_sc_tm", "postrelax_top_druggability_score", "postrelax_top_volume"]
+    titles = ["RFDiffusion Motif\nBackbone RMSD", "ESMFold pLDDT", "ESMFold BB-Ca RMSD", "ESMFold Sidechain\nRMSD", "Rosetta total_score", "SC-TM Score", "FPocket\nDruggability", "FPocket\nVolume"]
+    y_labels = ["Angstrom", "pLDDT", "Angstrom", "Angstrom", "[REU]", "TM Score", "Druggability", "Volume [AU]"]
+    dims = [(0,8), (0,100), (0,8), (0,8), None, (0,1), None, None]
 
     # plot results
     plots.violinplot_multiple_cols(
@@ -431,27 +423,27 @@ def main(args):
         show_fig = False
     )
 
-    # filter poses by values:
+    # fill up remaining output_metrics post-prediction
+    output_metrics["scTM_success"] = len(backbones.df[backbones.df["esm_tm_sc_tm"] >= 0.5]) / num_backbones
+    baker_success_df = backbones.df[(backbones.df["esm_plddt"] >= 75) & (backbones.df["esm_backbone_rmsd"] <= 1.5) & (backbones.df["esm_catres_bb_rmsd"] <= 1.5)]
+    output_metrics["baker_success"] = len(baker_success_df) / num_backbones
+    output_metrics["enzyme_success"] = len(baker_success_df[(baker_success_df["rfdiffusion_ligand_clashes"] < 1) & (baker_success_df["rfdiffusion_ligand_contacts"] > args.min_ligand_contacts) & (baker_success_df["rfdiffusion_rog"] <= args.max_rog)]) / num_backbones
+
+    # save output metrics
+    with open(f"{args.output_dir}/output_metrics.json", 'w', encoding="UTF-8") as f:
+        json.dump(output_metrics, f)
+
+    # filter poses to 'baker success' (kind of):
     backbones.filter_poses_by_value(score_col="esm_plddt", value=75, operator=">=")
     backbones.filter_poses_by_value(score_col="esm_backbone_rmsd", value=1.5, operator="<=")
     backbones.filter_poses_by_value(score_col="esm_catres_bb_rmsd", value=1.5, operator="<=")
+    #num_baker_success = num_backbones / len(backbones)
 
-    # calculate multi-scoerterm score for the final backbone filter:
-    backbones.calculate_composite_score(
-        name="design_composite_score",
-        scoreterms=["esm_plddt", "esm_tm_TM_score_ref", "esm_catres_bb_rmsd", "esm_catres_heavy_rmsd"],
-        weights=[-0.1, -0.2, 0.4, 0.4],
-        plot=True
-    )
-
-    # filter down to rfdiffusion backbones
-    backbones.filter_poses_by_rank(
-        n=1,
-        score_col="design_composite_score",
-        prefix="final_backbone_filter",
-        plot=True,
-        remove_layers=2
-    )
+    # filter poses to 'enzyme success'
+    backbones.filter_poses_by_value(score_col="rfdiffusion_ligand_clashes", value=1, operator=">=")
+    #backbones.filter_poses_by_value(score_col="rfdiffusion_ligand_contacts", value=args.min_ligand_contacts, operator=">=")
+    #backbones.filter_poses_by_value(score_col="rfdiffusion_rog", value=args.max_rog, operator="<=")
+    #num_enzyme_success = num_backbones / len(backbones)
 
     # calculate fraction of (design-successful) backbones where pocket was identified using fpocket.
     pocket_containing_fraction = backbones.df["postrelax_top_volume"].count() / len(backbones)
@@ -471,7 +463,7 @@ def main(args):
     _ = write_pymol_alignment_script(
         df=backbones.df,
         scoreterm="design_composite_score",
-        top_n=len(backbones),
+        top_n=np.min(len(backbones), 25),
         path_to_script=f"{results_dir}/align_results.pml",
         ref_motif_col = "template_fixedres",
         ref_catres_col = "template_fixedres",
@@ -523,5 +515,10 @@ if __name__ == "__main__":
     # fastrelax
     argparser.add_argument("--fastrelax_script", type=str, default=f"{protflow.config.AUXILIARY_RUNNER_SCRIPTS_DIR}/fastrelax_sap.xml", help="Specify path to fastrelax script that you would like to use.")
     arguments = argparser.parse_args()
+
+    # filtering options
+    argparser.add_argument("--max_rog", tpye=float, default=19, help="Maximum Radius of Gyration for the backbone to be a successful design.")
+    argparser.add_argument("--min_ligand_contacts", type=float, default=3, help="Minimum number of ligand contacts per ligand heavyatom for the design to be a success.")
+    argparser.add_argument("--keep_clashing_backbones", action="store_true", help="Set this flag if you want to keep backbones that clash with the ligand.")
 
     main(arguments)
