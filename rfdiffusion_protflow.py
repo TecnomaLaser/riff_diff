@@ -231,12 +231,15 @@ def main(args):
 
     # remove channel chain (chain B)
     logging.info(f"Diffusion completed, removing channel chain from diffusion outputs.")
-    chain_remover = protflow.tools.protein_edits.ChainRemover(jobstarter = small_cpu_jobstarter)
-    chain_remover.remove_chains(
-        poses = backbones,
-        prefix = "channel_removed",
-        chains = "B"
-    )
+    if args.channel_contig != "None":
+        chain_remover = protflow.tools.protein_edits.ChainRemover(jobstarter = small_cpu_jobstarter)
+        chain_remover.remove_chains(
+            poses = backbones,
+            prefix = "channel_removed",
+            chains = "B"
+        )
+    else:
+        backbones.df["channel_removed_location"] = backbones.df["rfdiffusion_location"]
 
     # create updated reference frags:
     if not os.path.isdir((updated_ref_frags_dir := f"{backbones.work_dir}/updated_reference_frags/")):
@@ -292,7 +295,8 @@ def main(args):
         titles = ["Template RMSD", "ROG", "Ligand Contacts", "Ligand Clashes", "RFdiffusion pLDDT"],
         y_labels = ["RMSD [\u00C5]", "ROG [\u00C5]", "#CA", "#Clashes", "pLDDT"],
         dims = [(0,5), (0,30), None, None, (0.8,1)],
-        out_path = f"{results_dir}/rfdiffusion_statistics.png"
+        out_path = f"{results_dir}/rfdiffusion_statistics.png",
+        show_fig = False
     )
 
     ############################################# SEQUENCE DESIGN ########################################################
@@ -423,7 +427,8 @@ def main(args):
         titles = titles,
         y_labels = y_labels,
         dims = dims,
-        out_path = f"{backbones.work_dir}/design_results.png"
+        out_path = f"{results_dir}/design_results.png",
+        show_fig = False
     )
 
     # filter poses by values:
@@ -479,7 +484,8 @@ def main(args):
         titles = titles,
         y_labels = y_labels,
         dims = dims,
-        out_path = f"{backbones.work_dir}/filtered_design_results.png"
+        out_path = f"{results_dir}/filtered_design_results.png",
+        show_fig = False
     )
 
 if __name__ == "__main__":
