@@ -154,6 +154,7 @@ def main(args):
     )
 
     logging.info(f"\n{'#'*50}\nRunning rfdiffusion_protflow.py on {args.input_dir}\n{'#'*50}\n")
+    logging.info(f"Min ligand contacts: {args.min_ligand_contacts}")
 
     # setup empty dictionary for all output metrics that should go into a separate DataFrame:
     output_metrics = {"scTM_success": None, "baker_success": None, "fraction_ligand_clashes": None, "average_ligand_contacts": None, "fraction_ligand_contacts": None}
@@ -294,7 +295,7 @@ def main(args):
     # collect ligand stats into output metrics:
     output_metrics["average_ligand_contacts"] = float(np.nan_to_num(backbones.df[backbones.df["rfdiffusion_ligand_clashes"] < 1]["rfdiffusion_ligand_contacts"].mean()))
     output_metrics["fraction_ligand_contacts"] = len(backbones.df[(backbones.df["rfdiffusion_ligand_clashes"] < 1) & (backbones.df["rfdiffusion_ligand_contacts"] > args.min_ligand_contacts)]) / num_backbones
-    output_metrics["fraction_ligand_clashes"] = len(backbones.df[backbones.df["rfdiffusion_ligand_contacts"] < 1]) / num_backbones
+    output_metrics["fraction_ligand_clashes"] = len(backbones.df[backbones.df["rfdiffusion_ligand_clashes"] < 1]) / num_backbones
 
     # plot rfdiffusion_stats
     results_dir = backbones.work_dir + "/results/"
@@ -357,7 +358,7 @@ def main(args):
         nstruct = 5,
         options = f"-parser:protocol {args.fastrelax_script} -beta"
     )
-    backbones.df["perresidue_total_score"] = backbones.df["fastrelax"]
+    backbones.df["perresidue_total_score"] = backbones.df["fastrelax_total_score"] / 200
 
     ############################################# BACKBONE FILTER ########################################################
     # calculate multi-scoerterm score for the final backbone filter:
@@ -402,7 +403,7 @@ def main(args):
         poses = backbones,
         prefix = "postrelax",
         options = f"--chain_as_ligand {args.ligand_chain}",
-        overwrite = True
+        overwrite = False
     )
 
     # plot outputs
@@ -427,9 +428,13 @@ def main(args):
     output_metrics["scTM_success"] = len(backbones.df[backbones.df["esm_tm_sc_tm"] >= 0.5]) / num_backbones
     baker_success_df = backbones.df[(backbones.df["esm_plddt"] >= 75) & (backbones.df["esm_backbone_rmsd"] <= 1.5) & (backbones.df["esm_catres_bb_rmsd"] <= 1.5)]
     output_metrics["baker_success"] = len(baker_success_df) / num_backbones
+    enzyme_success_df = baker_success_df[(baker_success_df["rfdiffusion_ligand_clashes"] < 1) & (baker_success_df["rfdiffusion_ligand_contacts"] > args.min_ligand_contacts) & (baker_success_df["rfdiffusion_rog"] <= args.max_rog)]
     output_metrics["enzyme_success"] = len(baker_success_df[(baker_success_df["rfdiffusion_ligand_clashes"] < 1) & (baker_success_df["rfdiffusion_ligand_contacts"] > args.min_ligand_contacts) & (baker_success_df["rfdiffusion_rog"] <= args.max_rog)]) / num_backbones
 
     # save output metrics
+    output_metrics_str = "\n".join([f"\t{metric}: {value}" for metric, value in output_metrics.items()])
+    logging.info(f"num_backbones = {num_backbones}")
+    logging.info(f"Finished collection of output metrics.\n{output_metrics_str}\n")
     with open(f"{args.output_dir}/output_metrics.json", 'w', encoding="UTF-8") as f:
         json.dump(output_metrics, f)
 
@@ -440,7 +445,7 @@ def main(args):
     #num_baker_success = num_backbones / len(backbones)
 
     # filter poses to 'enzyme success'
-    backbones.filter_poses_by_value(score_col="rfdiffusion_ligand_clashes", value=1, operator=">=")
+    #backbones.filter_poses_by_value(score_col="rfdiffusion_ligand_clashes", value=1, operator="<")
     #backbones.filter_poses_by_value(score_col="rfdiffusion_ligand_contacts", value=args.min_ligand_contacts, operator=">=")
     #backbones.filter_poses_by_value(score_col="rfdiffusion_rog", value=args.max_rog, operator="<=")
     #num_enzyme_success = num_backbones / len(backbones)
@@ -463,11 +468,24 @@ def main(args):
     _ = write_pymol_alignment_script(
         df=backbones.df,
         scoreterm="design_composite_score",
-        top_n=np.min(len(backbones), 25),
+        top_n=np.min([len(backbones), 25]),
         path_to_script=f"{results_dir}/align_results.pml",
         ref_motif_col = "template_fixedres",
         ref_catres_col = "template_fixedres",
-        target_catres_col = "fixed_residues"
+        target_catres_col = "fixed_residues",
+        target_motif_col = "fixed_residues"
+    )
+
+    logging.info(f"Writing pymol alignment script for enzyme_success backbones at {results_dir}")
+    _ = write_pymol_alignment_script(
+        df=enzyme_success_df,
+        scoreterm="design_composite_score",
+        top_n=len(enzyme_success_df),
+        path_to_script=f"{results_dir}/enzyme_success_backbones.pml",
+        ref_motif_col = "template_fixedres",
+        ref_catres_col = "template_fixedres",
+        target_catres_col = "fixed_residues",
+        target_motif_col = "fixed_residues"
     )
 
     plots.violinplot_multiple_cols(
@@ -514,11 +532,11 @@ if __name__ == "__main__":
 
     # fastrelax
     argparser.add_argument("--fastrelax_script", type=str, default=f"{protflow.config.AUXILIARY_RUNNER_SCRIPTS_DIR}/fastrelax_sap.xml", help="Specify path to fastrelax script that you would like to use.")
-    arguments = argparser.parse_args()
 
     # filtering options
-    argparser.add_argument("--max_rog", tpye=float, default=19, help="Maximum Radius of Gyration for the backbone to be a successful design.")
+    argparser.add_argument("--max_rog", type=float, default=18, help="Maximum Radius of Gyration for the backbone to be a successful design.")
     argparser.add_argument("--min_ligand_contacts", type=float, default=3, help="Minimum number of ligand contacts per ligand heavyatom for the design to be a success.")
     argparser.add_argument("--keep_clashing_backbones", action="store_true", help="Set this flag if you want to keep backbones that clash with the ligand.")
 
+    arguments = argparser.parse_args()
     main(arguments)
