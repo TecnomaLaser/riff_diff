@@ -288,8 +288,8 @@ def main(args):
 
     # calculate ligand stats
     logging.info(f"Calculating Ligand Statistics")
-    backbones.df["rfdiffusion_ligand_contacts"] = [calc_ligand_contacts(pose, ligand_chain=args.ligand_chain, min_dist=3.5, max_dist=7.5, atoms=["CA"], excluded_elements=["H"]) for pose in backbones.poses_list()]
-    backbones.df["rfdiffusion_ligand_clashes"] = [calc_ligand_clashes(pose, ligand_chain=args.ligand_chain, dist=3) for pose in backbones.poses_list()]
+    backbones.df["rfdiffusion_ligand_contacts"] = [calc_ligand_contacts(pose, ligand_chain=args.ligand_chain, min_dist=4, max_dist=8, atoms=["CA"], excluded_elements=["H"]) for pose in backbones.poses_list()]
+    backbones.df["rfdiffusion_ligand_clashes"] = [calc_ligand_clashes(pose, ligand_chain=args.ligand_chain, dist=3.5) for pose in backbones.poses_list()]
 
     # collect ligand stats into output metrics:
     output_metrics["average_ligand_contacts"] = float(np.nan_to_num(backbones.df[backbones.df["rfdiffusion_ligand_clashes"] < 1]["rfdiffusion_ligand_contacts"].mean()))
