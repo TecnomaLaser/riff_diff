@@ -224,7 +224,7 @@ def main(args):
     if args.model == "active_site":
         diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale=5 inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:substrate_contacts,weight:{args.as_substrate_contacts_weight}\\',\\'type:custom_ROG,weight:{args.rog_weight}\\'] potentials.guide_decay=quadratic"
     else:
-        diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale=5 inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:substrate_contacts,weight:0\\',\\'type:custom_recenter_ROG,weight:{args.decentralize_weight},rog_weight:{args.rog_weight},distance:{args.decentralize_distance}{recenter}\\'] potentials.guide_decay=quadratic"
+        diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale=5 inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:substrate_contacts,weight:0\\',\\'type:custom_ROG,weight:{args.rog_weight}\\',\\'type:custom_recenter,weight:{args.decentralize_weight},distance:{args.decentralize_distance}{recenter}\\'] potentials.guide_decay=quadratic"
     rfdiffusion = protflow.tools.rfdiffusion.RFdiffusion(jobstarter = gpu_jobstarter)
     backbones = rfdiffusion.run(
         poses=backbones,
