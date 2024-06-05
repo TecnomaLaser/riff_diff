@@ -1,4 +1,4 @@
-#!/home/mabr3112/anaconda3/envs/protflow/bin/python
+#!/home/tripp/anaconda3/envs/protflow/bin/python3
 '''
 Script to run RFdiffusion active-site model on artificial motif libraries.
 '''
@@ -16,6 +16,7 @@ import matplotlib
 import protflow
 import protflow.config
 from protflow.jobstarters import SbatchArrayJobstarter
+import protflow.poses
 import protflow.residues
 import protflow.tools
 import protflow.tools.colabfold
@@ -139,6 +140,14 @@ def replace_number_with_10(input_string):
     # Replace found patterns with '10-50'
     return re.sub(pattern, '10-50', input_string)
 
+def adjust_linker_length(motif_residues: dict, total_length: int, flanker_length: int, pose_opts: str):
+    num_linkers = len(motif_residues) - 1
+    total_motif_len = sum(len(motif_res) for motif_res in motif_residues)
+    linker_length = int(3 + (total_length - flanker_length - total_motif_len) / num_linkers) # 3 is added to conserve original 50/200 linker_length/total_length ratio in case of 4 AS residues with 7 res fragments
+    adjusted_pose_opts = overwrite_linker_length(pose_opts, total_length, linker_length)
+    return adjusted_pose_opts
+
+
 def main(args):
     '''executes everyting (duh)'''
     ################################################# INPUT PREP #########################################################
@@ -184,8 +193,10 @@ def main(args):
         raise ValueError(f"Argument 'total_flanker_length' was given, but not 'flanking'! Both args have to be provided.")
 
     # adjust linkers
-    linker_length, total_length = [int(x) for x in args.overwrite_linker_lengths.split(",")]
-    backbones.df["rfdiffusion_pose_opts"] = [overwrite_linker_length(pose_opts, total_length, linker_length) for pose_opts in backbones.df["rfdiffusion_pose_opts"].to_list()]
+    if args.linker_length == 'auto':
+        backbones.df["rfdiffusion_pose_opts"] = [adjust_linker_length(motif_residues, args.total_length, args.flanker_length, rfdiffusion_pose_opts) for motif_residues, rfdiffusion_pose_opts in zip(backbones.df["motif_residues"].to_list(), backbones.df["rfdiffusion_pose_opts"].to_list())]
+    else:
+        backbones.df["rfdiffusion_pose_opts"] = [overwrite_linker_length(pose_opts, args.total_length, args.linker_length) for pose_opts in backbones.df["rfdiffusion_pose_opts"].to_list()]
 
     # convert motifs from dict to ResidueSelection
     backbones.df["fixed_residues"] = [protflow.residues.from_dict(motif) for motif in backbones.df["fixed_residues"].to_list()]
@@ -348,7 +359,7 @@ def main(args):
         overwrite = False
     )
 
-    # run rosetta_script to evaluate residuewiese energy
+    # run rosetta_script to evaluate residuewise energy
     logging.info(f"TMAlign finished. Now relaxing {len(backbones)} structures with Rosetta fastrelax at 5 relax runs per pose.")
     rosetta = protflow.tools.rosetta.Rosetta(jobstarter = cpu_jobstarter)
     rosetta.run(
@@ -516,11 +527,12 @@ if __name__ == "__main__":
     argparser.add_argument("--as_model_path", type=str, default="/home/mabr3112/RFdiffusion/models/ActiveSite_ckpt.pt")
     argparser.add_argument("--num_rfdiffusions", type=int, default=10, help="Number of backbones to generate per input path.")
     argparser.add_argument("--recenter", type=str, default=None, help="Point (xyz) in input pdb towards the diffusion should be recentered. Set strength of recentering with --decentralize_distance. example: --recenter=-13.123;34.84;2.3209")
-    argparser.add_argument("--decentralize_distance", type=float, default=20, help="Default Distance to decentralize from diffusion center. Default direction of decentralization is away from the substrate.")
-    argparser.add_argument("--rog_weight", type=float, default=16, help="Strength of ROG weight of auxiliary potential. Adjust to desired ROG. be aware that it might decrease diffusion performance.")
+    argparser.add_argument("--decentralize_distance", type=float, default=6, help="Default Distance to decentralize from diffusion center. Default direction of decentralization is away from the substrate.")
+    argparser.add_argument("--rog_weight", type=float, default=3, help="Strength of ROG weight of auxiliary potential. Adjust to desired ROG. be aware that it might decrease diffusion performance.")
     argparser.add_argument("--flanking", type=str, default="split", help="How flanking should be set. Always leave on split. nterm or cterm also valid options.")
     argparser.add_argument("--flanker_length", type=int, default=30, help="Set Length of Flanking regions. For active_site model: 30 (recommended at least).")
-    argparser.add_argument("--overwrite_linker_lengths", type=str, default="50,200", help="linker length, total length. How long should the linkers be, how long should the protein be in total?")
+    argparser.add_argument("--total_length", type=int, default=200, help="Total length of protein to diffuse. This includes flanker, linkers and input fragments.")
+    argparser.add_argument("--linker_length", type=str, default="auto", help="linker length, total length. How long should the linkers be, how long should the protein be in total?")
     argparser.add_argument("--rfdiffusion_timesteps", type=int, default=50, help="Specify how many diffusion timesteps to run. 50 recommended. don't change")
     argparser.add_argument("--model", type=str, default="default", help="{default,active_site} Choose which model to use for RFdiffusion (active site or regular model).")
     argparser.add_argument("--channel_contig", type=str, default="Q1-21", help="RFdiffusion-style contig for chain B")
