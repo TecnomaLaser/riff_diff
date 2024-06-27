@@ -4,7 +4,6 @@ import os
 import sys
 import json
 import functools
-from functools import lru_cache
 import itertools
 import copy
 import logging
@@ -15,6 +14,8 @@ from Bio.PDB import *
 import pandas as pd
 import numpy as np
 from openbabel import openbabel
+import shutil
+
 
 
 
@@ -63,8 +64,7 @@ def identify_rotamer_by_bfactor_probability(entity):
     resnum = residue.id[1]
     return resnum
 
-@lru_cache(maxsize=100000000)
-def distance_detection_LRU(entity1, entity2, bb_only:bool=True, ligand:bool=False, clash_detection_vdw_multiplier:float=1.0, database:str='database', resnum:int=None, covalent_bonds:str=None):
+def distance_detection(entity1, entity2, bb_only:bool=True, ligand:bool=False, clash_detection_vdw_multiplier:float=1.0, database:str='database', resnum:int=None, covalent_bonds:str=None):
     '''
     checks for clashes by comparing VanderWaals radii. If clashes with ligand should be detected, set ligand to true. Ligand chain must be added as second entity.
     bb_only: only detect backbone clashes between to proteins or a protein and a ligand.
@@ -95,6 +95,7 @@ def distance_detection_LRU(entity1, entity2, bb_only:bool=True, ligand:bool=Fals
         element1 = atom_combination[0].element
         element2 = atom_combination[1].element
         clash_detection_limit = clash_detection_vdw_multiplier * (vdw_radii[str(element1)] + vdw_radii[str(element2)])
+
         if distance < clash_detection_limit:
             return True
     return False
@@ -124,20 +125,6 @@ def extract_chi_angles(residue):
     if resname in AAs_up_to_chi4():
         chi4 = round(residue.internal_coord.get_angle("chi4"), 1)
     return {"chi1": chi1, "chi2": chi2, "chi3": chi3, "chi4": chi4}
-
-@lru_cache(maxsize=100000)
-def create_ensemble_df(chain, data):
-    model = chain.get_parent()
-    struct = model.get_parent()
-    df = pd.DataFrame({'poses_description': struct.id, 'model_num': model.id}, index=[0])
-    data = pd.read_json(data)
-    df = df.merge(data, how='inner', on=['poses_description', 'model_num'])
-    residues = [res for res in chain.get_residues()]
-    df['frag_length'] = len(residues)
-    df['chain'] = chain.id
-    df = add_terminal_coordinates_to_df(df, residues[0], residues[-1])
-    df['origin'] = struct.id + '.pdb'
-    return df
 
 
 
@@ -179,7 +166,7 @@ def normalize_col(df:pd.DataFrame, col:str, scale:bool=False, output_col_name:st
     std = df[col].std()
     if not output_col_name:
         output_col_name = f"{col}_normalized"
-    if std == 0:
+    if df[col].nunique() == 1:
         df[output_col_name] = 0
         return df
     df[output_col_name] = (df[col] - median) / std
@@ -197,10 +184,12 @@ def scale_col(df:pd.DataFrame, col:str, inplace=False) -> pd.DataFrame:
         df.drop(f"{col}_scaled", axis=1, inplace=True)
     return df
 
+
 def combine_normalized_scores(df: pd.DataFrame, name:str, scoreterms:list, weights:list, normalize:bool=False, scale:bool=False):
     if not len(scoreterms) == len(weights):
         raise RuntimeError(f"Number of scoreterms ({len(scoreterms)}) and weights ({len(weights)}) must be equal!")
     df[name] = sum([df[col]*weight for col, weight in zip(scoreterms, weights)]) / sum(weights)
+    df[name] = df[name] / df[name].max()
     if normalize == True:
         df = normalize_col(df, name, False)
         df.drop(name, axis=1, inplace=True)
@@ -251,20 +240,31 @@ def run_masterv2(poses, output_dir, chains, rmsdCut:float, topN:int=None, minN:i
     sbatch_array_jobstarter(cmds=top_cmds, sbatch_options=sbatch_options, jobname="MASTER", max_array_size=max_array_size, wait=True, remove_cmdfile=False, cmdfile_dir=output_dir)
 
     combinations = [''.join(perm) for perm in itertools.permutations(chains)]
-    match_order_dict = {}
+    match_dict = {}
     out_df = []
-    for i in combinations:
-        match_order_dict[i] = 0
     for match in matchfiles:
-        match_dict = copy.copy(match_order_dict)
+        for i in combinations:
+            match_dict[i] = {'path_num_matches': 0, 'rmsds': []}
+            ensemble_rmsds = []
         with open(match, 'r') as m:
             lines = m.readlines()
             for line in lines:
                 order = assign_chain_letters(line)
                 if not order == None:
-                    match_dict[order] += 1
-        
-        df = pd.DataFrame({'description': [Path(match).stem for i in combinations], 'path': combinations, 'num_matches': [match_dict[i] for i in combinations]})
+                    match_dict[order]['path_num_matches'] += 1
+                    rmsd = float(line.split()[0])
+                    match_dict[order]['rmsds'].append(rmsd)
+                    ensemble_rmsds.append(rmsd)
+
+        ensemble_matches = sum([match_dict[i]['path_num_matches'] for i in combinations])
+        if ensemble_matches > 0:
+            mean_ensemble_rmsd = sum(ensemble_rmsds) / len(ensemble_rmsds)
+            min_ensemble_rmsd = min(ensemble_rmsds)
+        else:
+            mean_ensemble_rmsd = None
+            min_ensemble_rmsd = None
+
+        df = pd.DataFrame({'description': [Path(match).stem for i in combinations], 'path': combinations, 'ensemble_num_matches': [ensemble_matches for i in combinations], 'path_num_matches': [match_dict[i]['path_num_matches'] for i in combinations], 'mean_match_rmsd': [mean_ensemble_rmsd for i in combinations], 'min_match_rmsd': [min_ensemble_rmsd for i in combinations]})
         out_df.append(df)
     
     out_df = pd.concat(out_df).reset_index(drop=True)
@@ -303,6 +303,7 @@ def run_clash_detection(combinations, num_combs, max_array_size, directory, bb_m
     script_path: path to clash_detection.py script 
     '''
     ens_json_dir = os.path.join(directory, 'ensemble_pkls')
+    scores_json_dir = os.path.join(directory, 'scores')
     os.makedirs(ens_json_dir, exist_ok=True)
     out_pkl = os.path.join(directory, 'clash_detection_scores.pkl')
     if os.path.isfile(out_pkl):
@@ -318,6 +319,7 @@ def run_clash_detection(combinations, num_combs, max_array_size, directory, bb_m
     ensemble_num = 0
     ensemble_nums_toplist = []
     ensemble_names = []
+    score_names = []
     ensembles_toplist = []
     ensembles_list = []
 
@@ -339,9 +341,11 @@ def run_clash_detection(combinations, num_combs, max_array_size, directory, bb_m
     for ensembles_list, ensemble_nums in zip(ensembles_toplist, ensemble_nums_toplist):
         df = pd.DataFrame(ensembles_list).reset_index(drop=True)
         df['ensemble_num'] = ensemble_nums
-        name = os.path.join(ens_json_dir, f'ensembles_{count}.pkl')
-        ensemble_names.append(name)
-        df[['ensemble_num', 'poses', 'model_num', 'chain_id']].to_pickle(name)
+        in_name = os.path.join(ens_json_dir, f'ensembles_{count}.pkl')
+        out_name = os.path.join(scores_json_dir, f'ensembles_{count}.pkl')
+        ensemble_names.append(in_name)
+        score_names.append(out_name)
+        df[['ensemble_num', 'poses', 'model_num', 'chain_id']].to_pickle(in_name)
         in_df.append(df)
         count += 1
     log_and_print(f'Done writing pickles!')
@@ -356,9 +360,13 @@ def run_clash_detection(combinations, num_combs, max_array_size, directory, bb_m
 
     log_and_print(f'Reading in clash pickles...')    
     out_df = []
-    for file in os.listdir(f'{directory}/scores'):
-        if file.endswith('pkl'):
-            out_df.append(pd.read_pickle(os.path.join(f'{directory}/scores', file)))
+    for file in score_names:
+        out_df.append(pd.read_pickle(file))
+    
+    
+    #delete input pkls because this folder probably takes a lot of space
+    shutil.rmtree(ens_json_dir)
+    shutil.rmtree(scores_json_dir)
 
     out_df = pd.concat(out_df)
     log_and_print(f'Merging with original dataframe...')
@@ -432,10 +440,15 @@ def compile_inpaint_string(series:pd.Series):
     return inpaint_string
 
 def compile_rfdiff_pose_opts(series:pd.Series):
-    pose_opts = f"{compile_contig_string(series)} {compile_inpaint_string(series)} potentials.substrate={series['ligand_name']}"
+    #TODO: at the moment only the first ligand is included in the rfdiffusion run, it crashes when both are added :(
+    #pose_opts = f"{compile_contig_string(series)} {compile_inpaint_string(series)} potentials.substrate=[{series['ligand_name'].split(',')[0]}]"
+    if len(series['ligand_name'].split(',')) > 1:
+        pose_opts = f"{compile_contig_string(series)} {compile_inpaint_string(series)} potentials.substrate=LIG"
+    else:
+        pose_opts = f"{compile_contig_string(series)} {compile_inpaint_string(series)} potentials.substrate={series['ligand_name']}"
     return pose_opts
 
-def create_path_pdb(series:pd.Series, output_dir, ligand, add_channel, auto_superimpose_channel):
+def create_path_pdb(series:pd.Series, output_dir, ligand, channel_exists, add_channel, auto_superimpose_channel):
     #chains_models = series['path_name'].split('-')
     chains = sorted(series['path_order'])
     struct = Structure.Structure('out')
@@ -444,17 +457,30 @@ def create_path_pdb(series:pd.Series, output_dir, ligand, add_channel, auto_supe
     for fragment, chain in zip(frag_chains, chains):
         fragment.id = chain
         model.add(fragment)
-    model.add(ligand)
+    if len([res for res in ligand.get_residues()]) > 1:
+        ligands = copy.deepcopy(ligand)
+        for lig in ligands.get_residues():
+            lig.resname = 'LIG'
+        model.add(ligands)
+    else:
+        model.add(ligand)
     struct.add(model)
     # adding a channel only works if a ligand is present:
-    if add_channel and auto_superimpose_channel == True:
+    if channel_exists == True and auto_superimpose_channel == True:
         model = utils.biopython_tools.add_polyala_to_pose(model, polyala_path=add_channel, polyala_chain="Q", ligand_chain='Z')
-    elif add_channel:
+    elif channel_exists == True:
         model.add(myutils.import_structure_from_pdb(add_channel)[0]["Q"])
     output_path = os.path.join(output_dir, f"{series['path_name']}.pdb")
     myutils.write_multimodel_structure_to_pdb(struct, output_path)
     return output_path
     
+def combine_ligands(ligand_chain):
+    for lig in ligand_chain.get_residues():
+        lig.name = 'LIG'
+    return ligand_chain
+    
+
+
 def str2bool(v):
     if isinstance(v, bool):
         return v
@@ -465,8 +491,8 @@ def str2bool(v):
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
-def create_path_series(path_df, path_order, ligand, ligand_name, pdb_dir, add_channel, auto_superimpose_channel):
-    path_dict = {'fixed_residues': {}, 'motif_residues': {}, 'catres_identities': {}, 'covalent_bonds': {}, 'pose_paths': {}, 'original_chain_id': {}, 'model_num': {}}
+def create_path_series(path_df, path_order, ligands, ligand_name, pdb_dir, channel_exists, add_channel, auto_superimpose_channel):
+    path_dict = {'fixed_residues': {}, 'motif_residues': {}, 'catres_identities': {}, 'pose_paths': {}, 'original_chain_id': {}, 'model_num': {}}
     for index, row in path_df.iterrows():
         #TODO: this has to be done because subsequent scripts assume that first fragment is chain A, ... otherwise superpositioning does not work anymore
         new_chain = chain_alphabet()[row['path'].index(row['chain_id'])]
@@ -478,7 +504,7 @@ def create_path_series(path_df, path_order, ligand, ligand_name, pdb_dir, add_ch
         path_dict['fixed_residues'][row['chain_id']] = [row['rotamer_pos']]
         path_dict['motif_residues'][row['chain_id']] = [_ for _ in range(1, row['frag_length'] + 1)]
         path_dict['catres_identities'][f"{row['chain_id']}{row['rotamer_pos']}"] = row['AAs'][row['rotamer_pos'] - 1]
-    mean_cols = ['path_score', 'ensemble_score', 'fragment_score', 'backbone_score', 'num_matches', 'master_score', 'rotamer_probability', 'rotamer_score']
+    mean_cols = ['path_score', 'ensemble_score', 'fragment_score', 'backbone_score', 'path_num_matches', 'match_score', 'rotamer_probability', 'rotamer_score']
     series_dict = {}
     for col in mean_cols:
         series_dict[col] = path_df[col].mean()
@@ -491,7 +517,8 @@ def create_path_series(path_df, path_order, ligand, ligand_name, pdb_dir, add_ch
     series['ligand_name'] = ligand_name
     series['ligand_chain'] = 'Z'
     series['rfdiffusion_pose_opts'] = compile_rfdiff_pose_opts(series)
-    series['pose'] = create_path_pdb(series, pdb_dir, ligand, add_channel, auto_superimpose_channel)
+    series['pose'] = create_path_pdb(series, pdb_dir, ligands, channel_exists, add_channel, auto_superimpose_channel)
+    series['covalent_bonds'] = create_covalent_bonds(path_df)
     return series
 
 def chain_alphabet():
@@ -512,6 +539,14 @@ def main(args):
         raise RuntimeError('Either --json_files or --json_prefix must be specified!')
 
     auto_superimpose_channel = str2bool(args.auto_superimpose_channel)
+    if args.add_channel:
+        if os.path.isfile(args.add_channel) == True:
+            channel_exists = True
+        elif args.add_channel in ['False', 'false', '0', 'no']:
+            channel_exists = False
+        else:
+            raise RuntimeError(f'<add_channel> should be either path to pdb containing channel in chain Q or set to False!')
+
     
     out_json = os.path.join(args.working_dir, f'{args.output_prefix}_assembly.json') 
     os.makedirs(args.working_dir, exist_ok=True)
@@ -539,7 +574,7 @@ def main(args):
     input_jsons = sorted(list(set(input_jsons)))
 
     inputs = []
-    column_names = ['model_num', 'rotamer_pos', 'AAs', 'backbone_score', 'fragment_score', 'phi_psi_occurrence', 'secondary_structure', 'rotamer_probability', 'covalent_bond', 'ligand_chain', 'channel_chain', 'poses', 'poses_description']
+    column_names = ['model_num', 'rotamer_pos', 'AAs', 'backbone_score', 'fragment_score', 'rotamer_probability', 'covalent_bond', 'ligand_chain', 'poses', 'poses_description']
     for file in input_jsons:
         df = pd.read_json(file)
         if not all(column in df.columns for column in column_names):
@@ -558,23 +593,28 @@ def main(args):
 
     df_list = []
     structdict = {}
-    ensemble_size = []
+    ensemble_size = grouped_df.mean(numeric_only=True)['frag_length'].sum()
+    
     for pose, pose_df in grouped_df:
+        channel_clashes = 0
         log_and_print(f'Working on {pose}...')
         pose_df['input_poses'] = pose_df['poses']
-        model_num = 0
         pose_df['chain_id'] = chain_alphabet()[counter]
         struct = myutils.import_structure_from_pdb(pose)
         model_dfs = []
-        for model, model_df in zip(struct.get_models(), [model_df for num, model_df in pose_df.groupby('model_num', sort=False)]):
-            chain = model['A']
+        for index, series in pose_df.iterrows():
+            chain = struct[series['model_num']]['A']
+            if channel_exists == True and auto_superimpose_channel == False:
+                if distance_detection(chain, myutils.import_structure_from_pdb(args.add_channel)[0]["Q"], True, False, args.channel_clash_detection_vdw_multiplier, database=database) == True:
+                    channel_clashes += 1
+                    continue
             chain.id = chain_alphabet()[counter]
-            #TODO:would be better if this was already in input df, but leaving it this way for backwards compatibility
-            residues = [res for res in chain.get_residues()]
-            model_df['frag_length'] = len(residues)
-            model_df = add_terminal_coordinates_to_df(model_df, residues[0], residues[-1])
-            model_dfs.append(model_df)
-        pose_df = pd.concat(model_dfs)
+            model_dfs.append(series)
+        if channel_exists == True and auto_superimpose_channel == False:
+            log_and_print(f'Removed {channel_clashes} models that were clashing with channel chain found in {args.add_channel}.')
+        if len(model_dfs) == 0:
+            raise RuntimeError(f'Could not find any models that are not clashing with channel chain for {pose}. Adjust clash detection parameters or move channel!')
+        pose_df = pd.DataFrame(model_dfs)
         structdict[struct.id] = struct
         filename = os.path.join(clash_dir, f'{args.output_prefix}_{struct.id}_rechained.pdb')
         struct.id = filename
@@ -582,23 +622,21 @@ def main(args):
         pose_df['poses'] = os.path.abspath(filename)
         counter += 1
         #TODO: no idea if this is still required
-        if 'covalent_bond' in df.columns:
+        if 'covalent_bond' in pose_df.columns:
             pose_df['covalent_bond'].replace(np.nan, None, inplace=True)
         else:
             pose_df['covalent_bond'] = None
         df_list.append(pose_df)
-        ensemble_size.append(len(residues))
 
-    ligand = struct[0]['Z']
-    lig_name = ligand[1].get_resname()
-    for res in ligand.get_residues():
+    ligands = struct[0]['Z']
+    lig_names = ','.join([res.get_resname() for res in ligands.get_residues()])
+    for res in ligands.get_residues():
         res.id = ("H", res.id[1], res.id[2])
 
 
-    ensemble_size = sum(ensemble_size)
+    
     
     grouped_df = pd.concat(df_list).groupby('poses', sort=False)
-
     
     # generate every possible combination of input models
     num_models = [len(df.index) for group, df in grouped_df]
@@ -704,36 +742,44 @@ def main(args):
     log_and_print(f'Checking for matches in database below {rmsd_cutoff} A.')
 
     df = run_masterv2(poses=filenames, output_dir=f"{master_dir}/output", chains= [chain_alphabet()[i] for i in range(0, counter)], rmsdCut=rmsd_cutoff, master_dir=args.master_dir, database=args.master_db, max_array_size=args.max_array_size)
-    df = normalize_col(df, 'num_matches', True, 'master_score')
+    #df['combined_matches'] = df['ensemble_num_matches'] + df['path_num_matches']
+    df = normalize_col(df, 'path_num_matches', True)
+    df = normalize_col(df, 'ensemble_num_matches', True)
+    df = combine_normalized_scores(df, 'match_score', ['path_num_matches_normalized', 'ensemble_num_matches_normalized'], [args.path_match_weight, args.ensemble_match_score], False, False)
     post_match = master_input.merge(df, left_on='ensemble_name', right_on='description').drop('description', axis=1)
-    post_match = combine_normalized_scores(post_match, 'path_score', ['ensemble_score', 'master_score'], [args.fragment_score_weight, args.master_score_weight], False, True)
-    _ = plots.violinplot_multiple_cols(post_match, cols=['master_score', 'num_matches'], titles=['master score', f'matches < {rmsd_cutoff}'], y_labels=['AU', '#'], dims=[(-0.05, 1.05), (post_match['num_matches'].min(), post_match['num_matches'].max())], out_path=os.path.join(args.working_dir, f"{args.output_prefix}_master_matches_<_{rmsd_cutoff}.png"))
+    post_match = combine_normalized_scores(post_match, 'path_score', ['ensemble_score', 'match_score'], [args.fragment_score_weight, args.match_score_weight], False, False)
+    _ = plots.violinplot_multiple_cols(post_match, cols=['match_score', 'path_num_matches', 'ensemble_num_matches'], titles=['match score', f'path matches\n< {rmsd_cutoff}', f'ensemble matches\n< {rmsd_cutoff}'], y_labels=['AU', '#', '#'], dims=[(-0.05, 1.05), (post_match['path_num_matches'].max() * -0.05, post_match['path_num_matches'].max() * 1.05 ), (post_match['ensemble_num_matches'].max() * -0.05, post_match['ensemble_num_matches'].max() * 1.05 )], out_path=os.path.join(args.working_dir, f"{args.output_prefix}_master_matches_<_{rmsd_cutoff}.png"))
 
     
     path_dfs = post_match.copy()
     if args.match_cutoff:
         passed = int(len(path_dfs.index) / len(input_jsons))
-        path_dfs = path_dfs[path_dfs['num_matches'] >= args.match_cutoff]
+        path_dfs = path_dfs[path_dfs['ensemble_num_matches'] >= args.match_cutoff]
         filtered = int(len(path_dfs.index) / len(input_jsons))
-        log_and_print(f'Removed {passed - filtered} paths with less than {args.match_cutoff} matches below {rmsd_cutoff} A. Remaining paths: {filtered}.')
-
+        log_and_print(f'Removed {passed - filtered} paths with less than {args.match_cutoff} ensemble matches below {rmsd_cutoff} A. Remaining paths: {filtered}.')
         dfs = [path_dfs, post_match]
         df_names = ['filtered', 'unfiltered']
-        cols = ['path_score', 'master_score', 'ensemble_score', 'fragment_score', 'backbone_score', 'rotamer_score']
+        cols = ['path_score', 'match_score', 'ensemble_score', 'fragment_score', 'backbone_score', 'rotamer_score']
         col_names = ['path score', 'master score', 'ensemble score', 'fragment score', 'backbone score', 'rotamer score']
         y_labels = ['score [AU]', 'score [AU]', 'score [AU]', 'score [AU]', 'score [AU]', 'score [AU]']
         dims = [(-0.05, 1.05), (-0.05, 1.05), (-0.05, 1.05), (-0.05, 1.05), (-0.05, 1.05), (-0.05, 1.05)]
         plotpath = os.path.join(args.working_dir, f"{args.output_prefix}_num_matches_<_{args.match_cutoff}_filter.png")
+        _ = plots.violinplot_multiple_cols(path_dfs, cols=['match_score', 'path_num_matches', 'ensemble_num_matches', 'mean_match_rmsd', 'min_match_rmsd'], titles=['match score', f'path\nmatches < {rmsd_cutoff}', f'ensemble\nmatches < {rmsd_cutoff}', 'ensemble\nmean match rmsd', 'ensemble\nminimum match rmsd'], y_labels=['AU', '#', '#', 'A', 'A'], dims=[(-0.05, 1.05), (path_dfs['path_num_matches'].min() - (path_dfs['path_num_matches'].max() - path_dfs['path_num_matches'].min()) * 0.05, (path_dfs['path_num_matches'].max() + (path_dfs['path_num_matches'].max() - path_dfs['path_num_matches'].min()) * 0.05)), (args.match_cutoff - (path_dfs['path_num_matches'].max() - args.match_cutoff) * 0.05, (path_dfs['ensemble_num_matches'].max() + (path_dfs['ensemble_num_matches'].max() - args.match_cutoff) * 0.05)), (rmsd_cutoff * -0.05, rmsd_cutoff * 1.05), (rmsd_cutoff * -0.05, rmsd_cutoff * 1.05)], out_path=os.path.join(args.working_dir, f"{args.output_prefix}_master_matches_<_{rmsd_cutoff}_matchfilter.png"))
         _ = plots.violinplot_multiple_cols_dfs(dfs, df_names=df_names, cols=cols, titles=col_names, y_labels=y_labels, dims=dims, out_path=plotpath)
     
-    log_and_print(f'{int(len(path_dfs.index) / len(input_jsons))} paths passed all filters.')
-
 
     ens_num = 0
     pdb_dir = os.path.join(args.working_dir, "pdb_in")
     os.makedirs(pdb_dir, exist_ok=True)
 
-    top_path_dfs = path_dfs.copy().sort_values(['path_score', 'ensemble_num', 'path'], ascending=False).head(args.max_out * len(input_jsons))
+    ensemble_grouped_path_df = path_dfs.copy()
+    ensemble_filtered_path_df = []
+    for ensemble, df in ensemble_grouped_path_df.groupby('ensemble_num', sort=False):
+        ensemble_filtered_path_df.append(df.sort_values(['path_score', 'path'], ascending=False).head(args.max_paths_per_ensemble * len(input_jsons)))
+    ensemble_filtered_path_df = pd.concat(ensemble_filtered_path_df)
+    log_and_print(f'Removed {int((len(path_dfs.index) - len(ensemble_filtered_path_df.index)) / len(input_jsons))} paths because of {args.max_paths_per_ensemble} paths per ensemble cutoff.\nTotal passed paths: {int(len(ensemble_filtered_path_df.index) / len(input_jsons))}.')
+
+    top_path_dfs = ensemble_filtered_path_df.sort_values(['path_score', 'ensemble_num', 'path'], ascending=False).head(args.max_out * len(input_jsons))
     log_and_print(f'Selecting top {args.max_out} paths...')
 
     selected_paths = []
@@ -741,7 +787,7 @@ def main(args):
         ensemble_df['ensemble_num'] = ens_num
         ens_num += 1
         for path_order, path_df in ensemble_df.groupby('path', sort=False):
-            path_series = create_path_series(path_df, path_order, ligand, lig_name, pdb_dir, args.add_channel, auto_superimpose_channel) 
+            path_series = create_path_series(path_df, path_order, ligands, lig_names, pdb_dir, channel_exists, args.add_channel, auto_superimpose_channel) 
             selected_paths.append(path_series)
 
     selected_paths = pd.DataFrame(selected_paths).sort_values('path_score', ascending=False).reset_index(drop=True).drop(['path_order', 'pose_paths'], axis=1)
@@ -751,23 +797,24 @@ def main(args):
 
     ligand_dir = os.path.join(args.working_dir, 'ligand')
     os.makedirs(ligand_dir, exist_ok=True)
-    ligand_pdbfile = utils.biopython_tools.store_pose(ligand, (lig_path:=os.path.join(ligand_dir, "LG1.pdb")))
+    for index, ligand in enumerate(ligands.get_residues()):
+        ligand_pdbfile = utils.biopython_tools.store_pose(ligand, (lig_path:=os.path.join(ligand_dir, f"LG{index+1}.pdb")))
+        lig_name = ligand.get_resname()
+        if len(list(ligand.get_atoms())) > 2:
+            # store ligand as .mol file for rosetta .molfile-to-params.py
+            log_and_print(f"Running 'molfile_to_params.py' to generate params file for Rosetta.")
+            lig_molfile = obabel_fileconverter(input_file=lig_path, output_file=lig_path.replace(".pdb", ".mol2"), input_format="pdb", output_format=".mol2")
+            run(f"python3 {script_dir}/rosetta/molfile_to_params.py -n {lig_name} -p {ligand_dir}/LG{index+1} {lig_molfile} --keep-names --clobber --chain=Z", shell=True, stdout=True, check=True, stderr=True)
+            lig_path = f"{ligand_dir}/LG{index+1}_0001.pdb"
+        else:
+            log_and_print(f"Ligand at {ligand_pdbfile} contains less than 3 atoms. No Rosetta Params file can be written for it.")
 
-    if len(list(ligand.get_atoms())) > 2:
-        # store ligand as .mol file for rosetta .molfile-to-params.py
-        log_and_print(f"Running 'molfile_to_params.py' to generate params file for Rosetta.")
-        lig_molfile = obabel_fileconverter(input_file=lig_path, output_file=lig_path.replace(".pdb", ".mol2"), input_format="pdb", output_format=".mol2")
-        run(f"python3 {script_dir}/rosetta/molfile_to_params.py -n {lig_name} -p {ligand_dir}/LG1 {lig_molfile} --keep-names --clobber --chain=Z", shell=True, stdout=True, check=True, stderr=True)
-        lig_path = f"{ligand_dir}/LG1_0001.pdb"
-    else:
-        log_and_print(f"Ligand at {ligand_pdbfile} contains less than 3 atoms. No Rosetta Params file can be written for it.")
-
-    _ = plots.violinplot_multiple_cols(selected_paths, cols=['path_score', 'master_score', 'num_matches', 'ensemble_score', 'fragment_score', 'backbone_score', 'rotamer_score', 'rotamer_probability'], titles=['path score', 'master score', f'matches < {rmsd_cutoff}', 'ensemble score', 'mean fragment score', 'mean backbone score', 'mean rotamer score', 'mean rotamer\nprobability'], y_labels=['AU', 'AU', '#', 'AU', 'AU', 'AU', 'AU', 'probability'], dims=[(-0.05, 1.05), (-0.05, 1.05), (selected_paths['num_matches'].min(), selected_paths['num_matches'].max()), (-0.05, 1.05), (-0.05, 1.05), (-0.05, 1.05), (-0.05, 1.05), (-0.05, 1.05)], out_path=os.path.join(args.working_dir, f"{args.output_prefix}_selected_paths_info.png"))
+    _ = plots.violinplot_multiple_cols(selected_paths, cols=['path_score', 'match_score', 'path_num_matches', 'ensemble_score', 'fragment_score', 'backbone_score', 'rotamer_score', 'rotamer_probability'], titles=['path score', 'master score', f'matches < {rmsd_cutoff} A', 'ensemble score', 'mean fragment score', 'mean backbone score', 'mean rotamer score', 'mean rotamer\nprobability'], y_labels=['AU', 'AU', '#', 'AU', 'AU', 'AU', 'AU', 'probability'], dims=[(-0.05, 1.05), (-0.05, 1.05), (0 - selected_paths['path_num_matches'].max() * 0.05, selected_paths['path_num_matches'].max() * 1.05), (-0.05, 1.05), (-0.05, 1.05), (-0.05, 1.05), (-0.05, 1.05), (-0.05, 1.05)], out_path=os.path.join(args.working_dir, f"{args.output_prefix}_selected_paths_info.png"))
 
 
     dfs = [top_path_dfs, path_dfs]
     df_names = ['selected paths', '> match cutoff']
-    cols = ['path_score', 'master_score', 'ensemble_score', 'fragment_score', 'backbone_score', 'rotamer_score']
+    cols = ['path_score', 'match_score', 'ensemble_score', 'fragment_score', 'backbone_score', 'rotamer_score']
     col_names = ['path score', 'master score', 'ensemble score', 'fragment score', 'backbone score', 'rotamer score']
     y_labels = ['score [AU]', 'score [AU]', 'score [AU]', 'score [AU]', 'score [AU]', 'score [AU]']
     dims = [(-0.05, 1.05), (-0.05, 1.05), (-0.05, 1.05), (-0.05, 1.05), (-0.05, 1.05), (-0.05, 1.05)]
@@ -790,22 +837,25 @@ if __name__ == "__main__":
     argparser.add_argument("--working_dir", type=str, required=True, help="Path to working directory. Has to contain the input pdb files, otherwise run_ensemble_evaluator.py will not work!")
 
     # stuff you might want to adjust
-    argparser.add_argument("--fragment_backbone_clash_detection_vdw_multiplier", type=float, default=1.2, help="Multiplier for VanderWaals radii for clash detection inbetween backbone fragments. Clash is detected if distance_between_atoms < (VdW_radius_atom1 + VdW_radius_atom2)*multiplier")
+    argparser.add_argument("--channel_clash_detection_vdw_multiplier", type=float, default=0.9, help="Multiplier for VanderWaals radii for clash detection between backbone fragments and channel placeholder. Clash is detected if distance_between_atoms < (VdW_radius_atom1 + VdW_radius_atom2)*multiplier")
+    argparser.add_argument("--fragment_backbone_clash_detection_vdw_multiplier", type=float, default=1.0, help="Multiplier for VanderWaals radii for clash detection inbetween backbone fragments. Clash is detected if distance_between_atoms < (VdW_radius_atom1 + VdW_radius_atom2)*multiplier")
     argparser.add_argument("--backbone_ligand_clash_detection_vdw_multiplier", type=float, default=1.0, help="Multiplier for VanderWaals radii for clash detection between fragment backbones and ligand. Set None if no ligand is present. Clash is detected if distance_between_atoms < (VdW_radius_atom1 + VdW_radius_atom2)*multiplier")
     argparser.add_argument("--rotamer_ligand_clash_detection_vdw_multiplier", type=float, default=0.75, help="Multiplier for VanderWaals radii for clash detection between rotamer sidechain and ligand. Clash is detected if distance_between_atoms < (VdW_radius_atom1 + VdW_radius_atom2)*multiplier")
     argparser.add_argument("--fragment_fragment_clash_detection_vdw_multiplier", type=float, default=0.85, help="Multiplier for VanderWaals radii for clash detection inbetween fragments (including sidechains!). Effectively detects clashes between rotamer of one fragment and the other fragment (including the other rotamer) if multiplier is lower than <fragment_backbone_clash_detection_vdw_multiplier>. Clash is detected if distance_between_atoms < (VdW_radius_atom1 + VdW_radius_atom2)*multiplier")
     argparser.add_argument("--ligand_chain", type=str, default="Z", help="Name of ligand chain.")
     argparser.add_argument("--master_rmsd_cutoff", default='auto', help="Detects how many structures have segments with RMSD below this cutoff for each ensemble. Higher cutoff increases runtime tremendously!")
-    argparser.add_argument("--master_dir", type=str, default="/home/tripp/MASTER-v2-masterlib/bin/", help="Path to ")
+    argparser.add_argument("--master_dir", type=str, default="/home/tripp/MASTER-v2-masterlib/bin/", help="Path to master executable")
     argparser.add_argument("--master_db", type=str, default="/home/tripp/MASTER-v2-masterlib/master_db/list", help="Path to Master database")
     argparser.add_argument("--max_master_input", type=int, default=20000, help="Maximum number of ensembles that should be fed into master, sorted by fragment score")
-    argparser.add_argument("--master_score_weight", type=float, default=1, help="Maximum number of cpus to run on")
+    argparser.add_argument("--match_score_weight", type=float, default=1, help="Maximum number of cpus to run on")
     argparser.add_argument("--fragment_score_weight", type=float, default=1, help="Maximum number of cpus to run on")
     argparser.add_argument("--match_cutoff", type=int, default=1, help="Remove all ensembles that have less matches than <match_cutoff> below <master_rmsd_cutoff>")
-    argparser.add_argument("--max_out", type=int, default=50, help="Maximum number of output paths")
+    argparser.add_argument("--max_out", type=int, default=200, help="Maximum number of output paths")
     argparser.add_argument("--add_channel", type=str, default="/home/mabr3112/riff_diff/utils/helix_cone_long.pdb", help="If specified, adds the structure specified to the fragment to be used as a 'substrate channel' during diffusion. IMPORTANT!!!  Channel pdb-chain name has to be 'Q' ")
     argparser.add_argument("--auto_superimpose_channel", type=str, default="True", help="Set to false, if you want to copy the channel pdb-chain from the reference file without superimposing on moitf-substrate centroid axis.")
-
+    argparser.add_argument("--path_match_weight", type=float, default=1, help="Weight of the path-specific number of matches for calculating match score")
+    argparser.add_argument("--ensemble_match_score", type=float, default=1, help="Weight of the number of matches for all paths within the ensemble for calculating match score")
+    argparser.add_argument("--max_paths_per_ensemble", type=int, default=5, help="Maximum number of paths per ensemble (=same fragments but in different order)")
 
     argparser.add_argument("--max_array_size", type=int, default=320, help="Maximum number of cpus to run on")
 
