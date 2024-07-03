@@ -163,7 +163,7 @@ def instantiate_trajectory_plotting(plot_dir, df):
     esm_motif_ca_rmsd_traj = plots.PlottingTrajectory(y_label="RMSD [\u00C5]", location=os.path.join(plot_dir, "trajectory_esm_fixedres_ca.png"), title="ESMFold Fixed Residues\nCa RMSD Trajectory", dims=(0,5))
     esm_motif_ca_rmsd_traj.add_and_plot(df["esm_catres_bb_rmsd"], "screening")
     esm_catres_rmsd_traj = plots.PlottingTrajectory(y_label="RMSD [\u00C5]", location=os.path.join(plot_dir, "trajectory_esm_catres_rmsd.png"), title="ESMFold Fixed Residues\nSidechain RMSD Trajectory", dims=(0,5))
-    esm_motif_ca_rmsd_traj.add_and_plot(df["esm_catres_heavy_rmsd"], "screening")
+    esm_catres_rmsd_traj.add_and_plot(df["esm_catres_heavy_rmsd"], "screening")
     fastrelax_total_score_traj = plots.PlottingTrajectory(y_label="Rosetta total score [REU]", location=os.path.join(plot_dir, "trajectory_rosetta_total_score.png"), title="FastRelax Total Score Trajectory")
     postrelax_motif_ca_rmsd_traj = plots.PlottingTrajectory(y_label="RMSD [\u00C5]", location=os.path.join(plot_dir, "trajectory_postrelax_fixedres_rmsd.png"), title="Postrelax Fixed Residues\nCa RMSD Trajectory", dims=(0,5))
     postrelax_motif_catres_rmsd_traj = plots.PlottingTrajectory(y_label="RMSD [\u00C5]", location=os.path.join(plot_dir, "trajectory_postrelax_fixedres_catres.png"), title="Postrelax Fixed Residues\nSidechain RMSD Trajectory", dims=(0,5))
