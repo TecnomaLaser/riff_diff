@@ -13,7 +13,6 @@ import copy
 import itertools
 import shutil
 
-sys.path.append("/home/tripp/ProtFlow")
 # dependency
 import numpy as np
 import pandas as pd
@@ -340,7 +339,7 @@ def combine_screening_results(dir: str, prefixes: list, scores: list, weights: l
 
     # convert columns to residues (else, pymol script writer and refinement crash)
     for residue_col in residue_cols:
-        poses.df[residue_col] = [protflow.residues.ResidueSelection(motif, fast=True) for motif in poses.df[residue_col].to_list()]
+        poses.df[residue_col] = [protflow.residues.ResidueSelection(motif, from_scorefile=True) for motif in poses.df[residue_col].to_list()]
     # calculate screening composite score
     poses.calculate_composite_score(name='screening_composite_score', scoreterms=scores, weights=weights, plot=True)
 
@@ -463,6 +462,7 @@ def main(args):
     ligand_clash = LigandClashes(ligand_chain=args.ligand_chain, factor=args.ligand_clash_factor, atoms=['N', 'CA', 'C', 'O'], jobstarter=small_cpu_jobstarter)
     ligand_contacts = LigandContacts(ligand_chain=args.ligand_chain, min_dist=0, max_dist=8, atoms=['CA'], jobstarter=small_cpu_jobstarter)
     rog_calculator = GenericMetric(module="protflow.utils.metrics", function="calc_rog_of_pdb", jobstarter=small_cpu_jobstarter)
+    tm_score_calculator = protflow.metrics.tmscore.TMalign(jobstarter = small_cpu_jobstarter)
     ligand_mpnn = protflow.tools.ligandmpnn.LigandMPNN(jobstarter = gpu_jobstarter)
     rosetta = protflow.tools.rosetta.Rosetta(jobstarter = cpu_jobstarter, fail_on_missing_output_poses=True)
     esmfold = protflow.tools.esmfold.ESMFold(jobstarter = real_gpu_jobstarter)
@@ -758,7 +758,6 @@ def main(args):
             backbones = bb_rmsd.run(poses = backbones, ref_col="rfdiffusion_location", prefix = "esm_backbone")
 
             # calculate TM-Score and get sc-tm score:
-            tm_score_calculator = protflow.metrics.tmscore.TMalign(jobstarter = small_cpu_jobstarter)
             tm_score_calculator.run(
                 poses = backbones,
                 prefix = "esm_tm",
@@ -928,7 +927,7 @@ def main(args):
             for res_col in residue_cols:
                 if not res_col == "ligand_motif": 
                 #print([motif for motif in  backbones.df[res_col].to_list()])
-                    backbones.df[res_col] = [protflow.residues.ResidueSelection(motif, fast=True) for motif in backbones.df[res_col].to_list()]
+                    backbones.df[res_col] = [protflow.residues.ResidueSelection(motif, from_scorefile=True) for motif in backbones.df[res_col].to_list()]
 
         backbones.set_work_dir(args.output_dir)
 
@@ -1179,7 +1178,7 @@ def main(args):
         backbones = protflow.poses.Poses(poses=args.eval_input_json)
         logging.warning(f"Using data from refinement cycle {args.ref_cycles}. Make sure this is the correct one when reading in evaluation input poses from file!")
         for res_col in residue_cols:
-            backbones.df[res_col] = [protflow.residues.ResidueSelection(motif, fast=True) for motif in backbones.df[res_col].to_list()]
+            backbones.df[res_col] = [protflow.residues.ResidueSelection(motif, from_scorefile=True) for motif in backbones.df[res_col].to_list()]
 
     backbones.set_work_dir(os.path.join(args.output_dir, f"{ref_prefix}evaluation"))
 
