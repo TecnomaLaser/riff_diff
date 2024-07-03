@@ -1,4 +1,4 @@
-#!/home/tripp/anaconda3/envs/protflow/bin/python3
+#!/home/tripp/mambaforge/envs/protflow_new/bin/python
 '''
 Script to run RFdiffusion active-site model on artificial motif libraries.
 '''
