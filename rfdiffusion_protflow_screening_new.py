@@ -194,10 +194,10 @@ def create_intermediate_ref_results_dir(poses, dir:str, cycle:int):
     os.makedirs(dir, exist_ok=True)
 
     logging.info(f"Plotting outputs of cycle {cycle}.")
-    cols = [f"cycle_{cycle}_esm_plddt", f"cycle_{cycle}_esm_backbone_rmsd", f"cycle_{cycle}_esm_catres_heavy_rmsd", f"cycle_{cycle}_fastrelax_total_score", f"cycle_{cycle}_postrelax_top_druggability_score", f"cycle_{cycle}_postrelax_top_volume", f"cycle_{cycle}_postrelax_ligand_rmsd"]
-    titles = ["ESMFold pLDDT", "ESMFold BB-Ca RMSD", "ESMFold Sidechain\nRMSD", "Rosetta total_score", "FPocket\nDruggability", "FPocket\nVolume", "Postrelax ligand RMSD"]
-    y_labels = ["pLDDT", "Angstrom", "Angstrom", "[REU]", "Druggability", "Volume [AU]", "Angstrom"]
-    dims = [(0,100), (0,5), (0,5), None, None, None, (0,5)]
+    cols = [f"cycle_{cycle}_esm_plddt", f"cycle_{cycle}_esm_backbone_rmsd", f"cycle_{cycle}_esm_catres_heavy_rmsd", f"cycle_{cycle}_fastrelax_total_score", f"cycle_{cycle}_postrelax_ligand_rmsd"]
+    titles = ["ESMFold pLDDT", "ESMFold BB-Ca RMSD", "ESMFold Sidechain\nRMSD", "Rosetta total_score", "Postrelax ligand RMSD"]
+    y_labels = ["pLDDT", "Angstrom", "Angstrom", "[REU]", "Angstrom"]
+    dims = [(0,100), (0,5), (0,5), None, (0,5)]
 
     # plot results
     plots.violinplot_multiple_cols(
@@ -233,10 +233,10 @@ def create_final_results_dir(poses, dir:str):
     os.makedirs(dir, exist_ok=True)
 
     logging.info(f"Plotting final outputs.")
-    cols = ["final_AF2_plddt", "final_AF2_mean_plddt", "final_AF2_backbone_rmsd", "final_AF2_catres_heavy_rmsd", "final_fastrelax_total_score", "final_postrelax_top_druggability_score", "final_postrelax_top_volume", "final_postrelax_catres_heavy_rmsd", "final_postrelax_catres_bb_rmsd", "final_delta_apo_holo", "final_AF2_catres_heavy_rmsd_mean", "final_postrelax_catres_heavy_rmsd_mean", "final_postrelax_ligand_rmsd", "final_postrelax_ligand_rmsd_mean"]
-    titles = ["AF2 pLDDT", "AF2 pLDDT", "AF2 BB-Ca RMSD", "AF2 Sidechain\nRMSD", "Rosetta total_score", "FPocket\nDruggability", "FPocket\nVolume", "Relaxed Sidechain\nRMSD", "Relaxed BB-Ca RMSD", "Delta Apo Holo", "Mean AF2 Sidechain\nRMSD", "Mean Relaxed Sidechain\nRMSD", "Postrelax Ligand\nRMSD", "Mean Postrelax Ligand\nRMSD"]
-    y_labels = ["pLDDT", "pLDDT", "Angstrom", "Angstrom", "[REU]", "Druggability", "Volume [AU]", "Angstrom", "Angstrom", "[REU]", "Angstrom", "Angstrom", "Angstrom", "Angstrom"]
-    dims = [(0,100), (0,100), (0,5), (0,5), None, None, None, (0,5), (0,5), None, (0,5), (0,5), (0,5), (0,5)]
+    cols = ["final_AF2_plddt", "final_AF2_mean_plddt", "final_AF2_backbone_rmsd", "final_AF2_catres_heavy_rmsd", "final_fastrelax_total_score", "final_postrelax_catres_heavy_rmsd", "final_postrelax_catres_bb_rmsd", "final_delta_apo_holo", "final_AF2_catres_heavy_rmsd_mean", "final_postrelax_catres_heavy_rmsd_mean", "final_postrelax_ligand_rmsd", "final_postrelax_ligand_rmsd_mean"]
+    titles = ["AF2 pLDDT", "AF2 pLDDT", "AF2 BB-Ca RMSD", "AF2 Sidechain\nRMSD", "Rosetta total_score", "Relaxed Sidechain\nRMSD", "Relaxed BB-Ca RMSD", "Delta Apo Holo", "Mean AF2 Sidechain\nRMSD", "Mean Relaxed Sidechain\nRMSD", "Postrelax Ligand\nRMSD", "Mean Postrelax Ligand\nRMSD"]
+    y_labels = ["pLDDT", "pLDDT", "Angstrom", "Angstrom", "[REU]", "Angstrom", "Angstrom", "[REU]", "Angstrom", "Angstrom", "Angstrom", "Angstrom"]
+    dims = [(0,100), (0,100), (0,5), (0,5), None, (0,5), (0,5), None, (0,5), (0,5), (0,5), (0,5)]
 
     # plot results
     plots.violinplot_multiple_cols(
@@ -418,6 +418,18 @@ def create_reduced_motif(fixed_res:protflow.residues.ResidueSelection, motif_res
         reduced_dict[chain] = reduced_motif
     return protflow.residues.from_dict(reduced_dict)
     
+def set_log_file(logger: logging.Logger, log_file: str):
+    # Remove all handlers associated with the logger
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+        handler.close()
+
+    # Create a new handler with the new log file
+    handler = logging.FileHandler(log_file)
+    handler.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
 def main(args):
     '''executes everyting (duh)'''
@@ -428,11 +440,9 @@ def main(args):
     if not os.path.isdir(args.output_dir):
         os.makedirs(args.output_dir, exist_ok=True)
 
-    logging.basicConfig(
-        filename=f'{args.output_dir}/screening_log.txt',
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
-    )
+    logger = logging.getLogger('logger')
+    logger.setLevel(logging.INFO)
+    set_log_file(logger=logger, log_file=os.path.join(args.output_dir, 'setup.log'))
 
     # log cmd line arguments
     cmd = ''
@@ -487,7 +497,12 @@ def main(args):
     residue_cols = ["fixed_residues", "motif_residues", "template_motif", "template_fixedres", "ligand_motif"]
 
     if not args.ref_input_json and not args.eval_input_json:
-
+        set_log_file(logger=logger, log_file=os.path.join(args.output_dir, 'screening.log'))
+        cmd = ''
+        for key, value in vars(args).items():
+            cmd += f'--{key} {value} '
+        cmd = f'{sys.argv[0]} {cmd}'
+        logging.info(f"{sys.argv[0]} {cmd}")
         # load poses
         input_poses_path = os.path.join(args.output_dir, 'screening_input_poses', 'screening_input_poses.json')
         if os.path.isfile(input_poses_path):
@@ -908,11 +923,9 @@ def main(args):
     ############################################# REFINEMENT ########################################################
     if args.ref_input_json or (not args.ref_input_json and not args.eval_input_json):
         ref_prefix = f"{args.ref_prefix}_" if args.ref_prefix else ""
-        logging.basicConfig(
-            filename=f'{args.output_dir}/{ref_prefix}refinement_log.txt',
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s'
-        )
+
+        set_log_file(logger=logger, log_file=os.path.join(args.output_dir, 'refinement.log'))
+
         # log cmd line arguments
         cmd = ''
         for key, value in vars(args).items():
@@ -1099,12 +1112,15 @@ def main(args):
 
             backbones.df[f"cycle_{cycle}_perresidue_total_score"] = backbones.df[f"cycle_{cycle}_fastrelax_total_score"] / args.total_length
 
+            '''
+            
+            
             backbones = fpocket_runner.run(
                 poses = backbones,
                 prefix = f"cycle_{cycle}_postrelax",
                 options = f"--chain_as_ligand {args.ligand_chain}",
             )
-
+            '''
             # calculate multi-scoreterm score for the final backbone filter:
             backbones.calculate_composite_score(
                 name=f"cycle_{cycle}_refinement_composite_score",
@@ -1166,11 +1182,13 @@ def main(args):
     if args.eval_prefix: eval_prefix = f"{args.eval_prefix}_"
     else: eval_prefix = ref_prefix
 
-    logging.basicConfig(
-        filename=f'{args.output_dir}/{eval_prefix}evaluation_log.txt',
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
-    )
+    set_log_file(logger=logger, log_file=os.path.join(args.output_dir, 'evaluation.log'))
+    
+    cmd = ''
+    for key, value in vars(args).items():
+        cmd += f'--{key} {value} '
+    cmd = f'{sys.argv[0]} {cmd}'
+    logging.info(f"{sys.argv[0]} {cmd}")
 
     # set up poses for evaluation
     if args.eval_input_json:
@@ -1180,7 +1198,7 @@ def main(args):
         for res_col in residue_cols:
             backbones.df[res_col] = [protflow.residues.ResidueSelection(motif, from_scorefile=True) for motif in backbones.df[res_col].to_list()]
 
-    backbones.set_work_dir(os.path.join(args.output_dir, f"{ref_prefix}evaluation"))
+    backbones.set_work_dir(os.path.join(args.output_dir, f"{eval_prefix}evaluation"))
 
     if args.eval_input_poses_per_bb:
         logging.info(f"Filtering evaluation input poses on per backbone level according to cycle_{args.ref_cycles}_refinement_composite_score...")
