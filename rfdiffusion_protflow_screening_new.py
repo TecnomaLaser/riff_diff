@@ -595,11 +595,11 @@ def main(args):
             logging.info(f"Running {prefix} with settings: {f'decentralize_weight: {setting[0]}, decentralize_distance: {setting[1]}' if args.model=='default' else f'substrate_contacts_weights: {setting[0]}, rog_weights: {setting[1]}'}")
             backbones = copy.deepcopy(input_backbones)
             if args.model == "default":
-                backbones.df['screen_decentralize_weight'] = setting[0]
-                backbones.df['screen_decentralize_distance'] = setting[1]
+                backbones.df['screen_decentralize_weight'] = float(setting[0])
+                backbones.df['screen_decentralize_distance'] = float(setting[1])
             elif args.model == "active_site":
-                backbones.df['screen_substrate_contacts_weight'] = setting[0]
-                backbones.df['screen_rog_weight'] = setting[1]
+                backbones.df['screen_substrate_contacts_weight'] = float(setting[0])
+                backbones.df['screen_rog_weight'] = float(setting[1])
 
             backbones.df['screen'] = int(prefix.split('_')[1])
 
