@@ -353,8 +353,8 @@ def combine_screening_results(dir: str, prefixes: list, scores: list, weights: l
     grouped_df = poses.df.groupby('screen', sort=True)
     # plot all scores
     df_names, dfs = zip(*[(name, df) for name, df in grouped_df])
-    if model == "default": plot_scores = scores + ['design_composite_score', 'screen_decentralize_weight', 'screen_decentralize_distance', 'screen']
-    elif model == "active_site": plot_scores = scores + ['design_composite_score', 'screen_substrate_contacts_weight', 'screen_rog_weight', 'screen']
+    if model == "default": plot_scores = scores + ['design_composite_score', 'screen_decentralize_weight', 'screen_decentralize_distance', 'screen', 'screening_composite_score']
+    elif model == "active_site": plot_scores = scores + ['design_composite_score', 'screen_substrate_contacts_weight', 'screen_rog_weight', 'screen', 'screening_composite_score']
     for score in plot_scores:
         plots.violinplot_multiple_cols_dfs(dfs=dfs, df_names=df_names, cols=[score], y_labels=[score], out_path=os.path.join(out_dir, f'{score}_violin.png'))
 
@@ -431,6 +431,13 @@ def set_log_file(logger: logging.Logger, log_file: str):
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
+def log_cmd(arguments):
+    cmd = ''
+    for key, value in vars(arguments).items():
+        cmd += f'--{key} {value} '
+    cmd = f'{sys.argv[0]} {cmd}'
+    logging.info(f"{sys.argv[0]} {cmd}")
+
 def main(args):
     '''executes everyting (duh)'''
     ################################################# SET UP #########################################################
@@ -445,11 +452,7 @@ def main(args):
     set_log_file(logger=logger, log_file=os.path.join(args.output_dir, 'setup.log'))
 
     # log cmd line arguments
-    cmd = ''
-    for key, value in vars(args).items():
-        cmd += f'--{key} {value} '
-    cmd = f'{sys.argv[0]} {cmd}'
-    logging.info(f"{sys.argv[0]} {cmd}")
+    log_cmd(args)
 
     if args.ref_input_json and args.eval_input_json:
         raise ValueError(":ref_input_json: and :eval_input_json: are mutually exclusive!")
@@ -498,11 +501,8 @@ def main(args):
 
     if not args.ref_input_json and not args.eval_input_json:
         set_log_file(logger=logger, log_file=os.path.join(args.output_dir, 'screening.log'))
-        cmd = ''
-        for key, value in vars(args).items():
-            cmd += f'--{key} {value} '
-        cmd = f'{sys.argv[0]} {cmd}'
-        logging.info(f"{sys.argv[0]} {cmd}")
+        log_cmd(args)
+
         # load poses
         input_poses_path = os.path.join(args.output_dir, 'screening_input_poses', 'screening_input_poses.json')
         if os.path.isfile(input_poses_path):
@@ -925,13 +925,7 @@ def main(args):
         ref_prefix = f"{args.ref_prefix}_" if args.ref_prefix else ""
 
         set_log_file(logger=logger, log_file=os.path.join(args.output_dir, 'refinement.log'))
-
-        # log cmd line arguments
-        cmd = ''
-        for key, value in vars(args).items():
-            cmd += f'--{key} {value} '
-        cmd = f'{sys.argv[0]} {cmd}'
-        logging.info(f"{sys.argv[0]} {cmd}")
+        log_cmd(args)
 
         if args.ref_input_json:
             logging.info(f"Reading in refinement input poses from {args.ref_input_json}!")
@@ -1112,15 +1106,6 @@ def main(args):
 
             backbones.df[f"cycle_{cycle}_perresidue_total_score"] = backbones.df[f"cycle_{cycle}_fastrelax_total_score"] / args.total_length
 
-            '''
-            
-            
-            backbones = fpocket_runner.run(
-                poses = backbones,
-                prefix = f"cycle_{cycle}_postrelax",
-                options = f"--chain_as_ligand {args.ligand_chain}",
-            )
-            '''
             # calculate multi-scoreterm score for the final backbone filter:
             backbones.calculate_composite_score(
                 name=f"cycle_{cycle}_refinement_composite_score",
@@ -1180,15 +1165,10 @@ def main(args):
 
     ########################### FINAL EVALUATION ###########################
     if args.eval_prefix: eval_prefix = f"{args.eval_prefix}_"
-    else: eval_prefix = ref_prefix
+    else: eval_prefix = ref_prefix if ref_prefix else ""
 
     set_log_file(logger=logger, log_file=os.path.join(args.output_dir, 'evaluation.log'))
-    
-    cmd = ''
-    for key, value in vars(args).items():
-        cmd += f'--{key} {value} '
-    cmd = f'{sys.argv[0]} {cmd}'
-    logging.info(f"{sys.argv[0]} {cmd}")
+    log_cmd(args)
 
     # set up poses for evaluation
     if args.eval_input_json:
@@ -1319,13 +1299,6 @@ def main(args):
     
     # calculate delta score between apo and holo poses
     backbones.df['final_delta_apo_holo'] = backbones.df['final_fastrelax_total_score'] - backbones.df['final_fastrelax_apo_total_score']
-
-    # analyze pockets with fpocket
-    backbones = fpocket_runner.run(
-        poses = backbones,
-        prefix = f"final_postrelax",
-        options = f"--chain_as_ligand {args.ligand_chain}",
-    )
 
     # calculate final composite score
     backbones.calculate_composite_score(
