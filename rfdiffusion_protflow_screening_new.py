@@ -1109,8 +1109,8 @@ def main(args):
             # calculate multi-scoreterm score for the final backbone filter:
             backbones.calculate_composite_score(
                 name=f"cycle_{cycle}_refinement_composite_score",
-                scoreterms=[f"cycle_{cycle}_esm_plddt", f"cycle_{cycle}_esm_tm_TM_score_ref", f"cycle_{cycle}_esm_catres_bb_rmsd", f"cycle_{cycle}_esm_catres_heavy_rmsd", f"cycle_{cycle}_delta_apo_holo", f"cycle_{cycle}_postrelax_ligand_rmsd"],
-                weights=[-1, -1, 4, 6, 1, 1],
+                scoreterms=[f"cycle_{cycle}_esm_plddt", f"cycle_{cycle}_esm_tm_TM_score_ref", f"cycle_{cycle}_esm_catres_bb_rmsd", f"cycle_{cycle}_esm_catres_heavy_rmsd", f"cycle_{cycle}_delta_apo_holo", f"cycle_{cycle}_postrelax_ligand_rmsd", f"cycle_{cycle}_postrelax_catres_heavy_rmsd"],
+                weights=[-1, -1, 4, 4, 1, 1, 1],
                 plot=True
             )
 
