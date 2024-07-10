@@ -188,9 +188,9 @@ def add_final_data_to_trajectory_plots(df: pd.DataFrame, trajectory_plots):
     trajectory_plots['postrelax_ligand_rmsd'].add_and_plot(df['final_postrelax_ligand_rmsd'], "eval (AF2)")
     return trajectory_plots
 
-def create_intermediate_ref_results_dir(poses, dir:str, cycle:int):
+def create_ref_results_dir(poses, dir:str, cycle:int):
     # plot outputs and write alignment script
-
+    logging.info(f"Creating refinement output directory for refinement cycle {cycle} at {dir}...")
     os.makedirs(dir, exist_ok=True)
 
     logging.info(f"Plotting outputs of cycle {cycle}.")
@@ -1061,13 +1061,14 @@ def main(args):
             plddt_cutoff = ramp_cutoff(args.ref_plddt_cutoff_start, args.ref_plddt_cutoff_end, cycle, args.ref_cycles)
             catres_bb_rmsd_cutoff = ramp_cutoff(args.ref_catres_bb_rmsd_cutoff_start, args.ref_catres_bb_rmsd_cutoff_end, cycle, args.ref_cycles)
             # apply backbone-based filters
-            logging.info(f"Applying post-ESMFold backbone filters.")
+            logging.info(f"Applying post-ESMFold backbone filters...")
             backbones.filter_poses_by_value(score_col=f"cycle_{cycle}_esm_plddt", value=plddt_cutoff, operator=">=", prefix=f"cycle_{cycle}_esm_plddt", plot=True)
             backbones.filter_poses_by_value(score_col=f"cycle_{cycle}_esm_tm_TM_score_ref", value=0.9, operator=">=", prefix=f"cycle_{cycle}_esm_TM_score", plot=True)
             backbones.filter_poses_by_value(score_col=f"cycle_{cycle}_esm_catres_bb_rmsd", value=catres_bb_rmsd_cutoff, operator="<=", prefix=f"cycle_{cycle}_esm_catres_bb", plot=True)
 
             # repack predictions with attnpacker, if set
             if args.attnpacker_repack:
+                logging.info("Repacking ESMFold output with Attnpacker...")
                 backbones = attnpacker.run(
                     poses=backbones,
                     prefix=f"cycle_{cycle}_packing"
@@ -1078,6 +1079,7 @@ def main(args):
             apo_backbones = copy.deepcopy(backbones)
 
             # relax apo poses
+            logging.info("Relaxing poses without ligand present...")
             apo_backbones = rosetta.run(
                 poses = apo_backbones,
                 prefix = f"cycle_{cycle}_fastrelax_apo",
@@ -1086,12 +1088,12 @@ def main(args):
                 options = fr_options
             )
 
-            logging.info("Apo relax completed, filtering for best pose according to total score.")
             # filter for top relaxed apo pose and merge with original dataframe
             apo_backbones.filter_poses_by_rank(n=1, score_col=f"cycle_{cycle}_fastrelax_apo_total_score", remove_layers=1)
             backbones.df = backbones.df.merge(apo_backbones.df[[f'cycle_{cycle}_rlx_description', f"cycle_{cycle}_fastrelax_apo_total_score"]], on=f'cycle_{cycle}_rlx_description')
 
             # add ligand to poses
+            logging.info("Adding ligand to ESMFold predictions...")
             backbones = chain_adder.superimpose_add_chain(
                 poses = backbones,
                 prefix = f"cycle_{cycle}_ligand",
@@ -1105,6 +1107,7 @@ def main(args):
             #backbones = ligand_contacts.run(poses=backbones, prefix=f"cycle_{cycle}_esm_lig")
 
             # run rosetta_script to evaluate residuewise energy
+            logging.info("Relaxing poses with ligand present...")
             backbones = rosetta.run(
                 poses = backbones,
                 prefix = f"cycle_{cycle}_fastrelax",
@@ -1113,11 +1116,8 @@ def main(args):
                 options = fr_options
             )
 
-            # calculate delta apo holo score
-            backbones.df[f'cycle_{cycle}_delta_apo_holo'] = backbones.df[f"cycle_{cycle}_fastrelax_total_score"] - backbones.df[f"cycle_{cycle}_fastrelax_apo_total_score"]
-
             # calculate RMSD on relaxed poses
-            logging.info(f"Relax finished. Now calculating RMSD of catalytic residues for {len(backbones)} structures.")
+            logging.info(f"Calculating RMSD of catalytic residues and ligand for relaxed poses...")
             backbones = catres_motif_heavy_rmsd.run(poses = backbones, prefix = f"cycle_{cycle}_postrelax_catres_heavy")
             backbones = catres_motif_bb_rmsd.run(poses = backbones, prefix = f"cycle_{cycle}_postrelax_catres_bb")
             backbones = ligand_rmsd.run(poses = backbones, prefix = f"cycle_{cycle}_postrelax_ligand")
@@ -1126,20 +1126,24 @@ def main(args):
             # filter backbones down to relax input backbones
             backbones.filter_poses_by_rank(n=1, score_col=f"cycle_{cycle}_fastrelax_total_score", remove_layers=1)
 
-            backbones.df[f"cycle_{cycle}_perresidue_total_score"] = backbones.df[f"cycle_{cycle}_fastrelax_total_score"] / args.total_length
+            # ramp cutoffs during refinement
+            ligand_rmsd_cutoff = ramp_cutoff(args.ref_ligand_rmsd_start, args.ref_ligand_rmsd_end, cycle, args.ref_cycles)
+            # apply filters
+            logging.info("Removing poses with ligand rmsd above cutoff...")
+            backbones.filter_poses_by_value(score_col=f"cycle_{cycle}_postrelax_ligand_rmsd", value=ligand_rmsd_cutoff, operator="<=", prefix=f"cycle_{cycle}_ligand_rmsd", plot=True)        
+
+            # calculate delta apo holo score
+            logging.info("Calculating delta total score between relaxed poses with and without ligand present...")
+            backbones.df[f'cycle_{cycle}_delta_apo_holo'] = backbones.df[f"cycle_{cycle}_fastrelax_total_score"] - backbones.df[f"cycle_{cycle}_fastrelax_apo_total_score"]
 
             # calculate multi-scoreterm score for the final backbone filter:
+            logging.info("Calculating composite score for refinement evaluation...")
             backbones.calculate_composite_score(
                 name=f"cycle_{cycle}_refinement_composite_score",
                 scoreterms=[f"cycle_{cycle}_esm_plddt", f"cycle_{cycle}_esm_tm_TM_score_ref", f"cycle_{cycle}_esm_catres_bb_rmsd", f"cycle_{cycle}_esm_catres_heavy_rmsd", f"cycle_{cycle}_delta_apo_holo", f"cycle_{cycle}_postrelax_ligand_rmsd", f"cycle_{cycle}_postrelax_catres_heavy_rmsd"],
                 weights=[-1, -1, 4, 4, 1, 1, 1],
                 plot=True
             )
-
-            # ramp cutoffs during refinement
-            ligand_rmsd_cutoff = ramp_cutoff(args.ref_ligand_rmsd_start, args.ref_ligand_rmsd_end, cycle, args.ref_cycles)
-            # apply filters
-            backbones.filter_poses_by_value(score_col=f"cycle_{cycle}_postrelax_ligand_rmsd", value=ligand_rmsd_cutoff, operator="<=", prefix=f"cycle_{cycle}_ligand_rmsd", plot=True)        
 
             # define number of index layers that were added during refinement cycle (higher in subsequent cycles because reindexing adds a layer)
             layers = 4
@@ -1153,6 +1157,7 @@ def main(args):
             if cycle == args.ref_cycles: refinement_results = copy.deepcopy(backbones)
 
             # filter down to rfdiffusion backbones
+            logging.info("Filtering poses according to composite score...")
             backbones.filter_poses_by_rank(
                 n=args.ref_num_cycle_poses,
                 score_col=f"cycle_{cycle}_refinement_composite_score",
@@ -1163,7 +1168,7 @@ def main(args):
 
             trajectory_plots = update_trajectory_plotting(trajectory_plots=trajectory_plots, df=backbones.df, cycle=cycle)
             results_dir = os.path.join(backbones.work_dir, f"cycle_{cycle}_results")
-            create_intermediate_ref_results_dir(poses=backbones, dir=results_dir, cycle=cycle)
+            create_ref_results_dir(poses=backbones, dir=results_dir, cycle=cycle)
 
         # sort output
         backbones = refinement_results
@@ -1171,7 +1176,7 @@ def main(args):
         backbones.df.reset_index(drop=True, inplace=True)
 
         refinement_results_dir = os.path.join(args.output_dir, f"{ref_prefix}refinement_results")
-        create_intermediate_ref_results_dir(poses=backbones, dir=refinement_results_dir, cycle=cycle)
+        create_ref_results_dir(poses=backbones, dir=refinement_results_dir, cycle=cycle)
         backbones.save_scores(out_path=os.path.join(refinement_results_dir, "evaluation_input_poses.json"), out_format="json")
         backbones.set_work_dir(args.output_dir)
         backbones.save_scores()
