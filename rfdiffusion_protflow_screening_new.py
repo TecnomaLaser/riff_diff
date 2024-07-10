@@ -1025,7 +1025,7 @@ def main(args):
                 poses = backbones,
                 prefix = f"cycle_{cycle}_bbopt",
                 rosetta_application="rosetta_scripts.default.linuxgccrelease",
-                nstruct = 3,
+                nstruct = 1,
                 options = bb_opt_options,
                 pose_options=f'cycle_{cycle}_bbopt_opts'
             )
