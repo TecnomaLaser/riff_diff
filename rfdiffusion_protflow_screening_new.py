@@ -480,7 +480,7 @@ def main(args):
     # set up runners
     logging.info(f"Settung up runners.")
     rfdiffusion = protflow.tools.rfdiffusion.RFdiffusion(jobstarter = gpu_jobstarter)
-    fpocket_runner = protflow.metrics.fpocket.FPocket(jobstarter=cpu_jobstarter)
+    #fpocket_runner = protflow.metrics.fpocket.FPocket(jobstarter=cpu_jobstarter)
     chain_adder = protflow.tools.protein_edits.ChainAdder(jobstarter = small_cpu_jobstarter)
     chain_remover = protflow.tools.protein_edits.ChainRemover(jobstarter = small_cpu_jobstarter)
     bb_rmsd = BackboneRMSD(chains="A", jobstarter = small_cpu_jobstarter)
@@ -744,8 +744,6 @@ def main(args):
             if args.screen_mpnn_rlx_mpnn:
                 # optimize backbones 
                 backbones.df[f'screen_bbopt_opts'] = [write_bbopt_opts(row=row, cycle=1, total_cycles=5, reference_location_col="updated_reference_frags_location", cat_res_col="fixed_residues", motif_res_col="motif_residues", ligand_chain=args.ligand_chain) for _, row in backbones.df.iterrows()]
-                if params_files:
-                    bb_opt_options = bb_opt_options + f" -extra_res_fa {' '.join(params_files)}"
                 backbones = rosetta.run(
                     poses = backbones,
                     prefix = "bbopt",
@@ -900,7 +898,7 @@ def main(args):
             backbones.save_scores(out_path=results_dir)
 
             # save pocket structures
-            backbones.save_poses(out_path=pockets_dir, poses_col="postrelax_pocket_location")
+            #backbones.save_poses(out_path=pockets_dir, poses_col="postrelax_pocket_location")
 
             # write pymol alignment script?
             logging.info(f"Created results/ folder and writing pymol alignment script for best backbones at {results_dir}")
@@ -1069,6 +1067,8 @@ def main(args):
                 options = fr_options
             )
 
+            logging.info("Apo relax completed, filtering for best pose according to total score.")
+            print("apo relax finished")
             # filter for top relaxed apo pose and merge with original dataframe
             apo_backbones.filter_poses_by_rank(n=1, score_col=f"cycle_{cycle}_fastrelax_apo_total_score", remove_layers=1)
             backbones.df = backbones.df.merge(apo_backbones.df[[f'cycle_{cycle}_rlx_description', f"cycle_{cycle}_fastrelax_apo_total_score"]], on=f'cycle_{cycle}_rlx_description')
