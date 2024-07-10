@@ -888,8 +888,8 @@ def main(args):
                 json.dump(output_metrics, f)
 
             # calculate fraction of (design-successful) backbones where pocket was identified using fpocket.
-            pocket_containing_fraction = backbones.df["postrelax_top_volume"].count() / len(backbones)
-            logging.info(f"Fraction of RFdiffusion design-successful backbones that contain active-site pocket: {pocket_containing_fraction}")
+            #pocket_containing_fraction = backbones.df["postrelax_top_volume"].count() / len(backbones)
+            #logging.info(f"Fraction of RFdiffusion design-successful backbones that contain active-site pocket: {pocket_containing_fraction}")
 
             backbones.reindex_poses(prefix="reindex", remove_layers=5 if args.screen_mpnn_rlx_mpnn else 3, force_reindex=True)
 
