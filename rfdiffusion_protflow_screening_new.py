@@ -1002,8 +1002,10 @@ def main(args):
         trajectory_plots = instantiate_trajectory_plotting(backbones.plots_dir, backbones.df)
 
         for cycle in range(1, args.ref_cycles+1):
+            cycle_work_dir = os.path.join(args.output_dir, f"{ref_prefix}refinement_cycle_{cycle}")
+            backbones.set_work_dir(cycle_work_dir)
 
-            backbones.set_work_dir(os.path.join(args.output_dir, f"{ref_prefix}refinement_cycle_{cycle}"))
+            logging.info(f"Starting refinement cycle {cycle} in directory {cycle_work_dir}")
 
             # run ligandmpnn, return pdbs as poses
             backbones = ligand_mpnn.run(
@@ -1047,6 +1049,23 @@ def main(args):
                 prefix = f"cycle_{cycle}_esm",
             )
 
+
+            # calculate rmsds, TMscores and clashes
+            logging.info(f"Calculating post-ESMFold RMSDs.")
+            backbones = catres_motif_heavy_rmsd.run(poses = backbones, prefix = f"cycle_{cycle}_esm_catres_heavy")
+            backbones = catres_motif_bb_rmsd.run(poses = backbones, prefix = f"cycle_{cycle}_esm_catres_bb")
+            backbones = bb_rmsd.run(poses = backbones, ref_col=f"cycle_{cycle}_bbopt_location", prefix = f"cycle_{cycle}_esm_backbone")
+            backbones = tm_score_calculator.run(poses = backbones, prefix = f"cycle_{cycle}_esm_tm", ref_col = f"cycle_{cycle}_bbopt_location")
+            
+            # calculate cutoff
+            plddt_cutoff = ramp_cutoff(args.ref_plddt_cutoff_start, args.ref_plddt_cutoff_end, cycle, args.ref_cycles)
+            catres_bb_rmsd_cutoff = ramp_cutoff(args.ref_catres_bb_rmsd_cutoff_start, args.ref_catres_bb_rmsd_cutoff_end, cycle, args.ref_cycles)
+            # apply backbone-based filters
+            logging.info(f"Applying post-ESMFold backbone filters.")
+            backbones.filter_poses_by_value(score_col=f"cycle_{cycle}_esm_plddt", value=plddt_cutoff, operator=">=", prefix=f"cycle_{cycle}_esm_plddt", plot=True)
+            backbones.filter_poses_by_value(score_col=f"cycle_{cycle}_esm_tm_TM_score_ref", value=0.9, operator=">=", prefix=f"cycle_{cycle}_esm_TM_score", plot=True)
+            backbones.filter_poses_by_value(score_col=f"cycle_{cycle}_esm_catres_bb_rmsd", value=catres_bb_rmsd_cutoff, operator="<=", prefix=f"cycle_{cycle}_esm_catres_bb", plot=True)
+
             # repack predictions with attnpacker, if set
             if args.attnpacker_repack:
                 backbones = attnpacker.run(
@@ -1068,7 +1087,6 @@ def main(args):
             )
 
             logging.info("Apo relax completed, filtering for best pose according to total score.")
-            print("apo relax finished")
             # filter for top relaxed apo pose and merge with original dataframe
             apo_backbones.filter_poses_by_rank(n=1, score_col=f"cycle_{cycle}_fastrelax_apo_total_score", remove_layers=1)
             backbones.df = backbones.df.merge(apo_backbones.df[[f'cycle_{cycle}_rlx_description', f"cycle_{cycle}_fastrelax_apo_total_score"]], on=f'cycle_{cycle}_rlx_description')
@@ -1083,14 +1101,8 @@ def main(args):
             )
 
             # calculate ligand clashes and ligand contacts
-            backbones = ligand_clash.run(poses=backbones, prefix=f"cycle_{cycle}_esm_ligand")
-            backbones = ligand_contacts.run(poses=backbones, prefix=f"cycle_{cycle}_esm_lig")
-
-            # calculate rmsds, TMscores and clashes
-            backbones = catres_motif_heavy_rmsd.run(poses = backbones, prefix = f"cycle_{cycle}_esm_catres_heavy")
-            backbones = catres_motif_bb_rmsd.run(poses = backbones, prefix = f"cycle_{cycle}_esm_catres_bb")
-            backbones = bb_rmsd.run(poses = backbones, ref_col=f"cycle_{cycle}_bbopt_location", prefix = f"cycle_{cycle}_esm_backbone")
-            backbones = tm_score_calculator.run(poses = backbones, prefix = f"cycle_{cycle}_esm_tm", ref_col = f"cycle_{cycle}_bbopt_location")
+            #backbones = ligand_clash.run(poses=backbones, prefix=f"cycle_{cycle}_esm_ligand")
+            #backbones = ligand_contacts.run(poses=backbones, prefix=f"cycle_{cycle}_esm_lig")
 
             # run rosetta_script to evaluate residuewise energy
             backbones = rosetta.run(
@@ -1125,13 +1137,8 @@ def main(args):
             )
 
             # ramp cutoffs during refinement
-            plddt_cutoff = ramp_cutoff(args.ref_plddt_cutoff_start, args.ref_plddt_cutoff_end, cycle, args.ref_cycles)
-            catres_bb_rmsd_cutoff = ramp_cutoff(args.ref_catres_bb_rmsd_cutoff_start, args.ref_catres_bb_rmsd_cutoff_end, cycle, args.ref_cycles)
             ligand_rmsd_cutoff = ramp_cutoff(args.ref_ligand_rmsd_start, args.ref_ligand_rmsd_end, cycle, args.ref_cycles)
             # apply filters
-            backbones.filter_poses_by_value(score_col=f"cycle_{cycle}_esm_plddt", value=plddt_cutoff, operator=">=", prefix=f"cycle_{cycle}_esm_plddt", plot=True)
-            backbones.filter_poses_by_value(score_col=f"cycle_{cycle}_esm_tm_TM_score_ref", value=0.9, operator=">=", prefix=f"cycle_{cycle}_esm_TM_score", plot=True)
-            backbones.filter_poses_by_value(score_col=f"cycle_{cycle}_esm_catres_bb_rmsd", value=catres_bb_rmsd_cutoff, operator="<=", prefix=f"cycle_{cycle}_esm_catres_bb", plot=True)
             backbones.filter_poses_by_value(score_col=f"cycle_{cycle}_postrelax_ligand_rmsd", value=ligand_rmsd_cutoff, operator="<=", prefix=f"cycle_{cycle}_ligand_rmsd", plot=True)        
 
             # define number of index layers that were added during refinement cycle (higher in subsequent cycles because reindexing adds a layer)
