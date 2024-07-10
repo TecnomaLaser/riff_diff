@@ -826,11 +826,14 @@ def main(args):
                 copy_chain = args.ligand_chain
             )
 
+            '''
+            
             fpocket_runner.run(
                 poses = backbones,
                 prefix = "postrelax",
                 options = f"--chain_as_ligand {args.ligand_chain}",
             )
+            '''
 
             backbones = ligand_clash.run(poses=backbones, prefix="esm_ligand")
             backbones = ligand_contacts.run(poses=backbones, prefix="esm_lig")
@@ -854,10 +857,10 @@ def main(args):
 
             # plot outputs
             logging.info(f"Plotting outputs.")
-            cols = ["rfdiffusion_catres_rmsd", "esm_plddt", "esm_backbone_rmsd", "esm_catres_heavy_rmsd", "fastrelax_total_score", "esm_tm_sc_tm", "postrelax_top_druggability_score", "postrelax_top_volume", "esm_rog", "esm_lig_contacts", "esm_ligand_clashes"]
-            titles = ["RFDiffusion Motif\nBackbone RMSD", "ESMFold pLDDT", "ESMFold BB-Ca RMSD", "ESMFold Sidechain\nRMSD", "Rosetta total_score", "SC-TM Score", "FPocket\nDruggability", "FPocket\nVolume", "Radius of Gyration", "Ligand Contacts", "Ligand Clashes"]
-            y_labels = ["Angstrom", "pLDDT", "Angstrom", "Angstrom", "[REU]", "TM Score", "Druggability", "Volume [AU]", "Angstrom", "#", "#"]
-            dims = [(0,8), (0,100), (0,8), (0,8), None, (0,1), None, None, None, None, None]
+            cols = ["rfdiffusion_catres_rmsd", "esm_plddt", "esm_backbone_rmsd", "esm_catres_heavy_rmsd", "fastrelax_total_score", "esm_tm_sc_tm", "esm_rog", "esm_lig_contacts", "esm_ligand_clashes"]
+            titles = ["RFDiffusion Motif\nBackbone RMSD", "ESMFold pLDDT", "ESMFold BB-Ca RMSD", "ESMFold Sidechain\nRMSD", "Rosetta total_score", "SC-TM Score", "Radius of Gyration", "Ligand Contacts", "Ligand Clashes"]
+            y_labels = ["Angstrom", "pLDDT", "Angstrom", "Angstrom", "[REU]", "TM Score", "Angstrom", "#", "#"]
+            dims = [(0,8), (0,100), (0,8), (0,8), None, (0,1), None, None, None]
 
             # plot results
             plots.violinplot_multiple_cols(
@@ -981,10 +984,10 @@ def main(args):
         )
 
         logging.info(f"Plotting refinement input data.")
-        cols = ["esm_plddt", "esm_backbone_rmsd", "esm_catres_bb_rmsd", "esm_catres_heavy_rmsd", "fastrelax_total_score", "esm_tm_sc_tm", "postrelax_top_druggability_score", "postrelax_top_volume", "esm_rog", "esm_lig_contacts", "esm_ligand_clashes", "screen", "screen_decentralize_weight", "screen_decentralize_distance"]
-        titles = ["ESMFold pLDDT", "ESMFold BB-Ca RMSD", "ESMFold fixed res\nBB-Ca RMSD", "ESMFold Sidechain\nRMSD", "Rosetta total_score", "SC-TM Score", "FPocket\nDruggability", "FPocket\nVolume", "Radius of Gyration", "Ligand Contacts", "Ligand Clashes", "screen number", "decentralize weight", "decentralize distance"]
-        y_labels = ["pLDDT", "Angstrom", "Angstrom", "Angstrom", "[REU]", "TM Score", "Druggability", "Volume [AU]", "Angstrom", "#", "#", "#", "AU", "Angstrom"]
-        dims = [None, None, None, None, None, None, None, None, None, None, None, None, None, None]
+        cols = ["esm_plddt", "esm_backbone_rmsd", "esm_catres_bb_rmsd", "esm_catres_heavy_rmsd", "fastrelax_total_score", "esm_tm_sc_tm", "esm_rog", "esm_lig_contacts", "esm_ligand_clashes", "screen", "screen_decentralize_weight", "screen_decentralize_distance"]
+        titles = ["ESMFold pLDDT", "ESMFold BB-Ca RMSD", "ESMFold fixed res\nBB-Ca RMSD", "ESMFold Sidechain\nRMSD", "Rosetta total_score", "SC-TM Score", "Radius of Gyration", "Ligand Contacts", "Ligand Clashes", "screen number", "decentralize weight", "decentralize distance"]
+        y_labels = ["pLDDT", "Angstrom", "Angstrom", "Angstrom", "[REU]", "TM Score", "Angstrom", "#", "#", "#", "AU", "Angstrom"]
+        dims = [None, None, None, None, None, None, None, None, None, None, None, None]
 
         plots.violinplot_multiple_cols(
             dataframe = backbones.df,
