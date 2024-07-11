@@ -730,18 +730,29 @@ def main(args):
                 continue
             ############################################# SEQUENCE DESIGN AND ESMFOLD ########################################################
             # run LigandMPNN
-            logging.info(f"Running LigandMPNN on {len(backbones)} poses. Designing {args.screen_num_mpnn_sequences} sequences per pose.")
-            backbones = ligand_mpnn.run(
-                poses = backbones,
-                prefix = "postdiffusion_ligandmpnn",
-                nseq = args.screen_num_mpnn_sequences,
-                options = ligandmpnn_options,
-                model_type = "ligand_mpnn",
-                fixed_res_col = "fixed_residues",
-                return_seq_threaded_pdbs_as_pose=True if args.screen_mpnn_rlx_mpnn else False
+            if not args.screen_mpnn_rlx_mpnn:
+                logging.info(f"Running LigandMPNN on {len(backbones)} poses. Designing {args.screen_num_mpnn_sequences} sequences per pose.")
+                backbones = ligand_mpnn.run(
+                    poses = backbones,
+                    prefix = "postdiffusion_ligandmpnn",
+                    nseq = args.screen_num_mpnn_sequences,
+                    options = ligandmpnn_options,
+                    model_type = "ligand_mpnn",
+                    fixed_res_col = "fixed_residues",
+                    return_seq_threaded_pdbs_as_pose= False
             )
 
-            if args.screen_mpnn_rlx_mpnn:
+            else:
+                backbones = ligand_mpnn.run(
+                    poses = backbones,
+                    prefix = "postdiffusion_ligandmpnn",
+                    nseq = args.screen_num_seq_thread_sequences,
+                    options = ligandmpnn_options,
+                    model_type = "ligand_mpnn",
+                    fixed_res_col = "fixed_residues",
+                    return_seq_threaded_pdbs_as_pose = True
+            )
+
                 # optimize backbones 
                 backbones.df[f'screen_bbopt_opts'] = [write_bbopt_opts(row=row, cycle=1, total_cycles=5, reference_location_col="updated_reference_frags_location", cat_res_col="fixed_residues", motif_res_col="motif_residues", ligand_chain=args.ligand_chain) for _, row in backbones.df.iterrows()]
                 backbones = rosetta.run(
@@ -1004,9 +1015,9 @@ def main(args):
         for cycle in range(1, args.ref_cycles+1):
             cycle_work_dir = os.path.join(args.output_dir, f"{ref_prefix}refinement_cycle_{cycle}")
             backbones.set_work_dir(cycle_work_dir)
-
             logging.info(f"Starting refinement cycle {cycle} in directory {cycle_work_dir}")
 
+            logging.info("Threading sequences on poses with LigandMPNN...")
             # run ligandmpnn, return pdbs as poses
             backbones = ligand_mpnn.run(
                 poses = backbones,
@@ -1019,6 +1030,7 @@ def main(args):
             )
 
             # optimize backbones 
+            logging.info("Optimizing backbones with Rosetta...")
             backbones.df[f'cycle_{cycle}_bbopt_opts'] = [write_bbopt_opts(row=row, cycle=cycle, total_cycles=args.ref_cycles, reference_location_col="updated_reference_frags_location", cat_res_col="fixed_residues", motif_res_col="motif_residues", ligand_chain=args.ligand_chain) for _, row in backbones.df.iterrows()]
 
             backbones = rosetta.run(
@@ -1031,9 +1043,11 @@ def main(args):
             )
 
             # filter backbones down to starting backbones
+            logging.info("Selecting poses with lowest total score for each input backbone...")
             backbones.filter_poses_by_rank(n=1, score_col=f"cycle_{cycle}_bbopt_total_score", remove_layers=2)
 
             # run ligandmpnn on optimized poses
+            logging.info("Generating sequences for each pose...")
             backbones = ligand_mpnn.run(
                 poses = backbones,
                 prefix = f"cycle_{cycle}_mpnn",
@@ -1044,6 +1058,7 @@ def main(args):
             )
 
             # predict structures using ESMFold
+            logging.info("Predicting sequences with ESMFold...")
             backbones = esmfold.run(
                 poses = backbones,
                 prefix = f"cycle_{cycle}_esm",
@@ -1051,17 +1066,16 @@ def main(args):
 
 
             # calculate rmsds, TMscores and clashes
-            logging.info(f"Calculating post-ESMFold RMSDs.")
+            logging.info(f"Calculating post-ESMFold RMSDs...")
             backbones = catres_motif_heavy_rmsd.run(poses = backbones, prefix = f"cycle_{cycle}_esm_catres_heavy")
             backbones = catres_motif_bb_rmsd.run(poses = backbones, prefix = f"cycle_{cycle}_esm_catres_bb")
             backbones = bb_rmsd.run(poses = backbones, ref_col=f"cycle_{cycle}_bbopt_location", prefix = f"cycle_{cycle}_esm_backbone")
             backbones = tm_score_calculator.run(poses = backbones, prefix = f"cycle_{cycle}_esm_tm", ref_col = f"cycle_{cycle}_bbopt_location")
             
-            # calculate cutoff
+            # calculate cutoff & filter
+            logging.info(f"Applying post-ESMFold backbone filters...")
             plddt_cutoff = ramp_cutoff(args.ref_plddt_cutoff_start, args.ref_plddt_cutoff_end, cycle, args.ref_cycles)
             catres_bb_rmsd_cutoff = ramp_cutoff(args.ref_catres_bb_rmsd_cutoff_start, args.ref_catres_bb_rmsd_cutoff_end, cycle, args.ref_cycles)
-            # apply backbone-based filters
-            logging.info(f"Applying post-ESMFold backbone filters...")
             backbones.filter_poses_by_value(score_col=f"cycle_{cycle}_esm_plddt", value=plddt_cutoff, operator=">=", prefix=f"cycle_{cycle}_esm_plddt", plot=True)
             backbones.filter_poses_by_value(score_col=f"cycle_{cycle}_esm_tm_TM_score_ref", value=0.9, operator=">=", prefix=f"cycle_{cycle}_esm_TM_score", plot=True)
             backbones.filter_poses_by_value(score_col=f"cycle_{cycle}_esm_catres_bb_rmsd", value=catres_bb_rmsd_cutoff, operator="<=", prefix=f"cycle_{cycle}_esm_catres_bb", plot=True)
@@ -1089,6 +1103,7 @@ def main(args):
             )
 
             # filter for top relaxed apo pose and merge with original dataframe
+            logging.info("Selecting top poses for each relaxed structure...")
             apo_backbones.filter_poses_by_rank(n=1, score_col=f"cycle_{cycle}_fastrelax_apo_total_score", remove_layers=1)
             backbones.df = backbones.df.merge(apo_backbones.df[[f'cycle_{cycle}_rlx_description', f"cycle_{cycle}_fastrelax_apo_total_score"]], on=f'cycle_{cycle}_rlx_description')
 
@@ -1517,14 +1532,14 @@ if __name__ == "__main__":
     argparser.add_argument("--ref_input_poses_per_bb", default=None, help="Filter the number of refinement input poses on an input-backbone level. This filter is applied before the ref_input_poses filter.")
     argparser.add_argument("--ref_input_poses", type=int, default=None, help="Maximum number of input poses for refinement cycles after initial RFDiffusion-MPNN-ESM-Rosetta run. Poses will be filtered by design_composite_score. Filter can be applied on a per-input-backbone level if using the flag --ref_input_per_backbone.")
     argparser.add_argument("--ref_num_mpnn_seqs", type=int, default=50, help="Number of sequences that should be created with LigandMPNN during refinement.")
-    argparser.add_argument("--ref_catres_bb_rmsd_cutoff_end", type=float, default=0.8, help="End value for catres backbone rmsd filter after each refinement cycle. Filter will be ramped from start to end during refinement.")
-    argparser.add_argument("--ref_catres_bb_rmsd_cutoff_start", type=float, default=1.5, help="Start value for catres backbone rmsd filter after each refinement cycle. Filter will be ramped from start to end during refinement.")
+    argparser.add_argument("--ref_catres_bb_rmsd_cutoff_end", type=float, default=0.7, help="End value for catres backbone rmsd filter after each refinement cycle. Filter will be ramped from start to end during refinement.")
+    argparser.add_argument("--ref_catres_bb_rmsd_cutoff_start", type=float, default=1.2, help="Start value for catres backbone rmsd filter after each refinement cycle. Filter will be ramped from start to end during refinement.")
     argparser.add_argument("--ref_plddt_cutoff_end", type=float, default=85, help="End value for esm plddt filter after each refinement cycle. Filter will be ramped from start to end during refinement.")
-    argparser.add_argument("--ref_plddt_cutoff_start", type=float, default=75, help="Start value for esm plddt filter after each refinement cycle. Filter will be ramped from start to end during refinement.")
+    argparser.add_argument("--ref_plddt_cutoff_start", type=float, default=80, help="Start value for esm plddt filter after each refinement cycle. Filter will be ramped from start to end during refinement.")
     argparser.add_argument("--ref_ligand_rmsd_end", type=float, default=1.8, help="End value for esm plddt filter after each refinement cycle. Filter will be ramped from start to end during refinement.")
-    argparser.add_argument("--ref_ligand_rmsd_start", type=float, default=3, help="Start value for esm plddt filter after each refinement cycle. Filter will be ramped from start to end during refinement.")
+    argparser.add_argument("--ref_ligand_rmsd_start", type=float, default=2.8, help="Start value for esm plddt filter after each refinement cycle. Filter will be ramped from start to end during refinement.")
     argparser.add_argument("--ref_num_cycle_poses", type=int, default=3, help="Number of poses per unique diffusion backbone that should be passed on to the next refinement cycle.")
-    argparser.add_argument("--ref_seq_thread_num_mpnn_seqs", type=float, default=10, help="Number of LigandMPNN output sequences during the initial, sequence-threading phase (pre-relax).")
+    argparser.add_argument("--ref_seq_thread_num_mpnn_seqs", type=float, default=3, help="Number of LigandMPNN output sequences during the initial, sequence-threading phase (pre-relax).")
     argparser.add_argument("--ref_input_json", type=str, default=None, help="Read in a poses json file containing input poses for refinement. Screening will be skipped.")
 
     # screening
@@ -1536,7 +1551,8 @@ if __name__ == "__main__":
     argparser.add_argument("--screen_mpnn_rlx_mpnn", action="store_true", help="Instead of running LigandMPNN on RFdiffusion output and then directly predict sequences, run a MPNN-RLX-MPNN-ESM trajectory (like in refinement).")
     argparser.add_argument("--screen_substrate_contacts_weight", type=str, default="0", help="Substrate contacts potential weights that should be tested during screening. Separated by ;. Only used if <model> is 'active_site'.")
     argparser.add_argument("--screen_rog_weight", type=str, default="2,3,4", help="Weights for ROG potential that should be tested during screening. Separated by ;. Only used if <model> is 'active_site'.")
-    argparser.add_argument("--screen_num_mpnn_sequences", type=int, default=15, help="How many LigandMPNN sequences do you want to design after RFdiffusion?")
+    argparser.add_argument("--screen_num_mpnn_sequences", type=int, default=20, help="Number of LigandMPNN sequences that should be predicted with ESMFold post-RFdiffusion.")
+    argparser.add_argument("--screen_num_seq_thread_sequences", type=int, default=3, help="Number of LigandMPNN sequences that should be generated during the sequence threading phase (input for backbone optimization). Only used if <screen_mpnn_rlx_mpnn> is True.")
 
     # evaluation
     argparser.add_argument("--eval_prefix", type=str, default=None, help="Prefix for evaluation runs for testing different settings or refinement outputs.")
