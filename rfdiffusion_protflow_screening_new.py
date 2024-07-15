@@ -249,6 +249,21 @@ def create_final_results_dir(poses, dir:str):
         show_fig = False
     )
 
+    '''
+    trajectory_scores = ["plddt", "catres_heavy_rmsd", "catres_bb_rmsd"]
+    prefixes = ["final_AF"] + [f"cycle_{i}" for i in range(1, cycle+1)]
+
+    for score in trajectory_scores:
+        plots.violinplot_multiple_cols(
+            dataframe=poses.df,
+            cols=[f"{prefix}_{score}" for prefix in prefixes],
+            y_labels=["Angstrom", "Angstrom", "Angstrom", "Angstrom", "Angstrom"],
+            titles=["Mean AF2\nSidechain RMSD", "Mean AF2 catres\nBB RMSD", "Mean Relaxed\nSidechain RMSD", "Mean Relaxed catres\nBB RMSD", "Mean Postrelax\nLigand RMSD"],
+            out_path=os.path.join(dir, "evaluation_mean_rmsds.png"),
+            show_fig=False
+        )
+    '''
+
     plots.violinplot_multiple_cols(
         dataframe=poses.df,
         cols=["final_AF2_catres_heavy_rmsd_mean", "final_AF2_catres_bb_rmsd_mean", "final_postrelax_catres_heavy_rmsd_mean", "final_postrelax_catres_bb_rmsd_mean", "final_postrelax_ligand_rmsd_mean"],
@@ -520,6 +535,9 @@ def main(args):
         fr_options = fr_options + f" -extra_res_fa {' '.join(params_files)}"
         bb_opt_options = bb_opt_options + f" -extra_res_fa {' '.join(params_files)}"
 
+    ############################################## SCREENING ######################################################
+
+
     if not args.ref_input_json and not args.eval_input_json:
         # load poses
         input_poses_path = os.path.join(args.output_dir, 'screening_input_poses', 'screening_input_poses.json')
@@ -675,7 +693,6 @@ def main(args):
 
             backbones = rog_calculator.run(poses=backbones, prefix="rfdiffusion_rog")
             backbones.df.rename({"rfdiffusion_rog_data": "rfdiffusion_rog"}, inplace=True, axis=1)
-            #backbones.df["rfdiffusion_rog"] = [calc_rog_of_pdb(pose) for pose in backbones.poses_list()]
 
             # calculate motif_rmsd of RFdiffusion (for plotting later)
             catres_motif_bb_rmsd.run(
@@ -728,6 +745,7 @@ def main(args):
                 logging.warning(f"No poses passed RFdiffusion filtering steps during {prefix}")
                 prefixes.remove(prefix)
                 continue
+
             ############################################# SEQUENCE DESIGN AND ESMFOLD ########################################################
             # run LigandMPNN
             if not args.screen_mpnn_rlx_mpnn:
@@ -903,7 +921,6 @@ def main(args):
             backbones.reindex_poses(prefix="reindex", remove_layers=5 if args.screen_mpnn_rlx_mpnn else 3, force_reindex=True)
 
             # copy filtered poses to new location
-            pockets_dir = os.path.join(results_dir, "pocket_pdbs")
             backbones.save_poses(out_path=results_dir)
             backbones.save_poses(out_path=results_dir, poses_col="input_poses")
             backbones.save_scores(out_path=results_dir)
@@ -1012,7 +1029,7 @@ def main(args):
         # instantiate plotting trajectories
         trajectory_plots = instantiate_trajectory_plotting(backbones.plots_dir, backbones.df)
 
-        for cycle in range(1, args.ref_cycles+1):
+        for cycle in range(args.ref_start_cycle, args.ref_cycles+1):
             cycle_work_dir = os.path.join(args.output_dir, f"{ref_prefix}refinement_cycle_{cycle}")
             backbones.set_work_dir(cycle_work_dir)
             logging.info(f"Starting refinement cycle {cycle} in directory {cycle_work_dir}")
@@ -1308,7 +1325,7 @@ def main(args):
     # plot mean results
     plots.violinplot_multiple_cols(
         dataframe=backbones.df,
-        cols=["final_AF2_catres_heavy_rmsd_mean", "final_AF2_catres_bb_rmsd_mean", "final_postrelax_catres_heavy_rmsd_mean", "final_postrelax_catres_bb_rmsd", "final_postrelax_ligand_rmsd"],
+        cols=["final_AF2_catres_heavy_rmsd_mean", "final_AF2_catres_bb_rmsd_mean", "final_postrelax_catres_heavy_rmsd_mean", "final_postrelax_catres_bb_rmsd_mean", "final_postrelax_ligand_rmsd_mean"],
         y_labels=["Angstrom", "Angstrom", "Angstrom", "Angstrom", "Angstrom", "Angstrom"],
         titles=["Mean AF2\nSidechain RMSD", "Mean AF2 catres\nBB RMSD", "Mean Relaxed\nSidechain RMSD", "Mean Relaxed catres\nBB RMSD", "Mean Relaxed ligand\nRMSD"],
         out_path=os.path.join(backbones.plots_dir, "final_mean_rmsds.png"),
@@ -1383,7 +1400,7 @@ def main(args):
             poses = backbones,
             prefix = f"variants_bbopt",
             rosetta_application="rosetta_scripts.default.linuxgccrelease",
-            nstruct = 5,
+            nstruct = 3,
             options = bb_opt_options,
             pose_options='variants_bbopt_opts'
         )
@@ -1391,13 +1408,11 @@ def main(args):
         # filter backbones down to starting backbones
         backbones.filter_poses_by_rank(n=1, score_col="variants_bbopt_total_score", remove_layers=1)
 
-        ligandmpnn_options = f"--ligand_mpnn_use_side_chain_context 1 {args.ligandmpnn_options}"
-
         # optimize sequences
         backbones = ligand_mpnn.run(
             poses = backbones,
             prefix = f"variants_mpnn",
-            nseq = 50,
+            nseq = 25,
             model_type = "ligand_mpnn",
             options = ligandmpnn_options,
             pose_options = "variants_pose_opts",
@@ -1409,6 +1424,17 @@ def main(args):
             poses = backbones,
             prefix = f"variants_esm",
         )
+
+        # calculate rmsds, TMscores and clashes
+        backbones = catres_motif_heavy_rmsd.run(poses = backbones, prefix = f"variants_esm_catres_heavy")
+        backbones = catres_motif_bb_rmsd.run(poses = backbones, prefix = f"variants_esm_catres_bb")
+        backbones = bb_rmsd.run(poses = backbones, ref_col=f"variants_bbopt_location", prefix = f"variants_esm_backbone")
+        backbones = tm_score_calculator.run(poses = backbones, prefix = f"variants_esm_tm", ref_col = f"variants_bbopt_location")
+
+        backbones.filter_poses_by_value(score_col=f"variants_esm_plddt", value=args.ref_plddt_cutoff_end, operator=">=", prefix=f"variants_esm_plddt", plot=True)
+        backbones.filter_poses_by_value(score_col=f"variants_esm_tm_TM_score_ref", value=0.9, operator=">=", prefix=f"variants_esm_TM_score", plot=True)
+        backbones.filter_poses_by_value(score_col=f"variants_esm_catres_bb_rmsd", value=args.ref_catres_bb_rmsd_cutoff_end, operator="<=", prefix=f"variants_esm_catres_bb", plot=True)
+
 
         # repack predictions with attnpacker, if set
         if args.attnpacker_repack:
@@ -1447,12 +1473,6 @@ def main(args):
         backbones = ligand_clash.run(poses=backbones, prefix=f"variants_esm_ligand")
         backbones = ligand_contacts.run(poses=backbones, prefix=f"variants_esm_lig")
 
-        # calculate rmsds, TMscores and clashes
-        backbones = catres_motif_heavy_rmsd.run(poses = backbones, prefix = f"variants_esm_catres_heavy")
-        backbones = catres_motif_bb_rmsd.run(poses = backbones, prefix = f"variants_esm_catres_bb")
-        backbones = bb_rmsd.run(poses = backbones, ref_col=f"variants_bbopt_location", prefix = f"variants_esm_backbone")
-        backbones = tm_score_calculator.run(poses = backbones, prefix = f"variants_esm_tm", ref_col = f"variants_bbopt_location")
-
         # run rosetta_script to evaluate residuewise energy
         backbones = rosetta.run(
             poses = backbones,
@@ -1484,9 +1504,6 @@ def main(args):
         )
 
         # apply filters
-        backbones.filter_poses_by_value(score_col=f"cycle_{cycle}_esm_plddt", value=args.ref_plddt_cutoff_end, operator=">=", prefix=f"cycle_{cycle}_esm_plddt", plot=True)
-        backbones.filter_poses_by_value(score_col=f"cycle_{cycle}_esm_tm_TM_score_ref", value=0.9, operator=">=", prefix=f"cycle_{cycle}_esm_TM_score", plot=True)
-        backbones.filter_poses_by_value(score_col=f"cycle_{cycle}_esm_catres_bb_rmsd", value=args.ref_catres_bb_rmsd_cutoff_end, operator="<=", prefix=f"cycle_{cycle}_esm_catres_bb", plot=True)
         backbones.filter_poses_by_value(score_col=f"cycle_{cycle}_postrelax_ligand_rmsd", value=args.ref_ligand_rmsd_end, operator="<=", prefix=f"cycle_{cycle}_ligand_rmsd", plot=True)        
 
         # define number of index layers that were added during refinement cycle (higher in subsequent cycles because reindexing adds a layer)
@@ -1504,6 +1521,122 @@ def main(args):
             plot=True,
             remove_layers=1
         )
+
+        backbones.convert_pdb_to_fasta(prefix="variants_fasta_conversion", update_poses=True)
+
+        # run AF2
+        backbones = colabfold.run(
+            poses=backbones,
+            prefix="variants_AF2",
+            return_top_n_poses=5
+        )
+
+        if args.attnpacker_repack:
+            backbones = attnpacker.run(
+                poses=backbones,
+                prefix=f"variants_AF2_packing"
+            )
+
+        # copy description column for merging with apo relaxed structures
+        backbones.df['variants_af2_relax_input_description'] = backbones.df['poses_description']
+        apo_backbones = copy.deepcopy(backbones)
+        apo_backbones.filter_poses_by_rank(n=1, score_col="variants_AF2_plddt", remove_layers=1 if not args.attnpacker_repack else 2)
+
+        # add ligand chain 
+        backbones = chain_adder.superimpose_add_chain(
+            poses = backbones,
+            prefix = f"variants_AF2_ligand",
+            ref_col = "updated_reference_frags_location",
+            target_motif = "fixed_residues",
+            copy_chain = args.ligand_chain
+        )
+
+        # calculate RMSDs & TMscore
+        backbones = catres_motif_heavy_rmsd.run(poses=backbones, prefix=f"variants_AF2_catres_heavy")
+        backbones = catres_motif_bb_rmsd.run(poses=backbones, prefix=f"variants_AF2_catres_bb")
+        backbones = bb_rmsd.run(poses=backbones, prefix="variants_AF2_backbone", ref_col=f"variants_bbopt_location")
+        backbones = bb_rmsd.run(poses=backbones, prefix="variants_AF2_ESM_bb", ref_col=f"variants_esm_location")
+        backbones = tm_score_calculator.run(poses=backbones, prefix=f"variants_AF2_tm", ref_col=f"variants_bbopt_location")
+        backbones = tm_score_calculator.run(poses=backbones, prefix=f"variants_AF2_ESM_tm", ref_col=f"variants_esm_location")
+
+        # average scores for all AF2 models
+        backbones = calculate_mean_scores(poses=backbones, scores=["variants_AF2_catres_heavy_rmsd", "variants_AF2_catres_bb_rmsd", "variants_AF2_backbone_rmsd", "variants_AF2_tm_TM_score_ref"], remove_layers=1 if not args.attnpacker_repack else 2)
+        
+        # filter for AF2 top model
+        backbones.filter_poses_by_rank(n=1, score_col="final_AF2_plddt", remove_layers=1 if not args.attnpacker_repack else 2)
+
+        # calculate ligand clashes and ligand contacts
+        backbones = ligand_clash.run(poses=backbones, prefix="variants_AF2_ligand")
+        backbones = ligand_contacts.run(poses=backbones, prefix="variants_AF2_lig")
+
+        # relax predictions with ligand present
+        backbones = rosetta.run(
+            poses = backbones,
+            prefix = "variants_AF2_fastrelax",
+            rosetta_application="rosetta_scripts.default.linuxgccrelease",
+            nstruct = 5,
+            options = fr_options
+        )
+
+        # calculate RMSDs of relaxed poses
+        backbones = catres_motif_heavy_rmsd.run(poses = backbones, prefix = f"variants_AF2_postrelax_catres_heavy")
+        backbones = catres_motif_bb_rmsd.run(poses = backbones, prefix = f"variants_AF2_postrelax_catres_bb")
+        backbones = ligand_rmsd.run(poses = backbones, prefix = "variants_AF2_postrelax_ligand")
+
+
+        # average values for all relaxed poses
+        backbones = calculate_mean_scores(poses=backbones, scores=["variants_AF2_postrelax_catres_heavy_rmsd", "variants_AF2_postrelax_catres_bb_rmsd", "variants_AF2_postrelax_ligand_rmsd"], remove_layers=1)
+        
+        # plot mean results
+        plots.violinplot_multiple_cols(
+            dataframe=backbones.df,
+            cols=["variants_AF2_catres_heavy_rmsd", "variants_AF2_catres_bb_rmsd_mean", "variants_AF2_postrelax_catres_heavy_rmsd_mean", "variants_AF2_postrelax_catres_bb_rmsd_mean", "variants_AF2_postrelax_ligand_rmsd_mean"],
+            y_labels=["Angstrom", "Angstrom", "Angstrom", "Angstrom", "Angstrom", "Angstrom"],
+            titles=["Mean AF2\nSidechain RMSD", "Mean AF2 catres\nBB RMSD", "Mean Relaxed\nSidechain RMSD", "Mean Relaxed catres\nBB RMSD", "Mean Relaxed ligand\nRMSD"],
+            out_path=os.path.join(backbones.plots_dir, "variants_mean_rmsds.png"),
+            show_fig=False
+        )
+
+        # filter to relaxed pose with best score
+        backbones.filter_poses_by_rank(n=1, score_col="variants_AF2_fastrelax_total_score", remove_layers=1)
+
+        # relax apo poses
+        apo_backbones = rosetta.run(
+            poses = apo_backbones,
+            prefix = "variants_AF2_fastrelax_apo",
+            rosetta_application="rosetta_scripts.default.linuxgccrelease",
+            nstruct = 5,
+            options = fr_options
+        )
+
+        # filter to relaxed pose with best score, merge dataframes
+        apo_backbones.filter_poses_by_rank(n=1, score_col="variants_AF2_fastrelax_apo_total_score", remove_layers=1)
+        backbones.df = backbones.df.merge(apo_backbones.df[['variants_af2_relax_input_description', 'variants_AF2_fastrelax_apo_total_score']], on='variants_af2_relax_input_description')
+        
+        # calculate delta score between apo and holo poses
+        backbones.df['variants_AF2_delta_apo_holo'] = backbones.df['variants_AF2_fastrelax_total_score'] - backbones.df['variants_AF2_fastrelax_apo_total_score']
+
+        # calculate final composite score
+        backbones.calculate_composite_score(
+            name=f"variants_final_composite_score",
+            scoreterms=["variants_AF2_plddt", "variants_AF2_tm_TM_score_ref", "variants_AF2_catres_bb_rmsd", "variants_AF2_catres_heavy_rmsd", "variants_AF2_delta_apo_holo", "variants_AF2_postrelax_ligand_rmsd", "variants_AF2_postrelax_catres_heavy_rmsd"],
+            weights=[-1, -1, 4, 4, 1, 1, 1],
+            plot=True
+        )
+
+        # apply filters only after calculating composite scores!
+        backbones.filter_poses_by_value(score_col="variants_AF2_mean_plddt", value=args.ref_plddt_cutoff_end, operator=">=", prefix="variants_AF2_plddt", plot=True)
+        backbones.filter_poses_by_value(score_col="variants_AF2_tm_TM_score_ref", value=0.9, operator=">=", prefix=f"variants_AF2_TM_score", plot=True)
+        backbones.filter_poses_by_value(score_col="variants_AF2_catres_bb_rmsd_mean", value=args.ref_catres_bb_rmsd_cutoff_end, operator="<=", prefix=f"variants_AF2_catres_bb_rmsd", plot=True)
+        backbones.filter_poses_by_value(score_col="variants_AF2_postrelax_ligand_rmsd_mean", value=args.ref_ligand_rmsd_end, operator="<=", prefix="variants_ligand_rmsd", plot=True)        
+        backbones.filter_poses_by_value(score_col="variants_AF2_ESM_bb_rmsd", value=1.5, operator="<=", prefix="variants_AF2_ESM_bb_rmsd", plot=True) # check if AF2 and ESM predictions agree      
+
+        backbones.reindex_poses(prefix="variants_final_reindex", remove_layers=2 if not args.attnpacker_repack else 3)
+        #backbones.filter_poses_by_rank(n=25, score_col='final_composite_score', prefix="final_composite_score", plot=True)
+        #if not args.eval_input_json:
+        #    trajectory_plots = add_final_data_to_trajectory_plots(backbones.df, trajectory_plots)
+        create_final_results_dir(backbones, os.path.join(args.output_dir, f"{variants_prefix}variants_results"))
+        backbones.save_scores()
 
 
 
@@ -1531,7 +1664,7 @@ if __name__ == "__main__":
     argparser.add_argument("--ref_cycles", type=int, default=5, help="Number of Rosetta-MPNN-ESM refinement cycles.")
     argparser.add_argument("--ref_input_poses_per_bb", default=None, help="Filter the number of refinement input poses on an input-backbone level. This filter is applied before the ref_input_poses filter.")
     argparser.add_argument("--ref_input_poses", type=int, default=None, help="Maximum number of input poses for refinement cycles after initial RFDiffusion-MPNN-ESM-Rosetta run. Poses will be filtered by design_composite_score. Filter can be applied on a per-input-backbone level if using the flag --ref_input_per_backbone.")
-    argparser.add_argument("--ref_num_mpnn_seqs", type=int, default=50, help="Number of sequences that should be created with LigandMPNN during refinement.")
+    argparser.add_argument("--ref_num_mpnn_seqs", type=int, default=25, help="Number of sequences that should be created with LigandMPNN during refinement.")
     argparser.add_argument("--ref_catres_bb_rmsd_cutoff_end", type=float, default=0.7, help="End value for catres backbone rmsd filter after each refinement cycle. Filter will be ramped from start to end during refinement.")
     argparser.add_argument("--ref_catres_bb_rmsd_cutoff_start", type=float, default=1.2, help="Start value for catres backbone rmsd filter after each refinement cycle. Filter will be ramped from start to end during refinement.")
     argparser.add_argument("--ref_plddt_cutoff_end", type=float, default=85, help="End value for esm plddt filter after each refinement cycle. Filter will be ramped from start to end during refinement.")
@@ -1541,6 +1674,7 @@ if __name__ == "__main__":
     argparser.add_argument("--ref_num_cycle_poses", type=int, default=3, help="Number of poses per unique diffusion backbone that should be passed on to the next refinement cycle.")
     argparser.add_argument("--ref_seq_thread_num_mpnn_seqs", type=float, default=3, help="Number of LigandMPNN output sequences during the initial, sequence-threading phase (pre-relax).")
     argparser.add_argument("--ref_input_json", type=str, default=None, help="Read in a poses json file containing input poses for refinement. Screening will be skipped.")
+    argparser.add_argument("--ref_start_cycle", type=int, default=1, help="Number from which to start cycles. Useful if adding additional refinement cycles after a run has completed.")
 
     # screening
     argparser.add_argument("--screen_decentralize_weights", type=str, default="10;20;30;40", help="Decentralize weights that should be tested during screening. Separated by ;. Only used if <model> is 'default'.")
