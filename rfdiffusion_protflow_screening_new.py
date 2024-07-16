@@ -169,7 +169,8 @@ def instantiate_trajectory_plotting(plot_dir, df):
     postrelax_motif_catres_rmsd_traj = plots.PlottingTrajectory(y_label="RMSD [\u00C5]", location=os.path.join(plot_dir, "trajectory_postrelax_fixedres_catres.png"), title="Postrelax Fixed Residues\nSidechain RMSD Trajectory", dims=(0,5))
     delta_apo_holo_traj = plots.PlottingTrajectory(y_label="Rosetta delta total score [REU]", location=os.path.join(plot_dir, "trajectory_delta_apo_holo.png"), title="Delta Apo Holo Total Score Trajectory")
     postrelax_ligand_rmsd_traj = plots.PlottingTrajectory(y_label="RMSD [\u00C5]", location=os.path.join(plot_dir, "trajectory_postrelax_ligand_rmsd.png"), title="Postrelax Ligand\nRMSD Trajectory", dims=(0,5))
-    return {'esm_plddt': esm_plddt_traj, 'esm_backbone_rmsd': esm_bb_ca_rmsd_traj, 'esm_catres_bb_rmsd': esm_motif_ca_rmsd_traj, 'esm_catres_heavy_rmsd': esm_catres_rmsd_traj, 'fastrelax_total_score': fastrelax_total_score_traj, 'postrelax_catres_heavy_rmsd': postrelax_motif_catres_rmsd_traj, 'postrelax_catres_bb_rmsd': postrelax_motif_ca_rmsd_traj, 'delta_apo_holo': delta_apo_holo_traj, 'postrelax_ligand_rmsd': postrelax_ligand_rmsd_traj}
+    sap_score_traj = plots.PlottingTrajectory(y_label="Spatial Aggregation Propensity", location=os.path.join(plot_dir, "trajectory_sap_score.png"), title="SAP Score Trajectory", dims=(0,5))
+    return {'esm_plddt': esm_plddt_traj, 'esm_backbone_rmsd': esm_bb_ca_rmsd_traj, 'esm_catres_bb_rmsd': esm_motif_ca_rmsd_traj, 'esm_catres_heavy_rmsd': esm_catres_rmsd_traj, 'fastrelax_total_score': fastrelax_total_score_traj, 'postrelax_catres_heavy_rmsd': postrelax_motif_catres_rmsd_traj, 'postrelax_catres_bb_rmsd': postrelax_motif_ca_rmsd_traj, 'delta_apo_holo': delta_apo_holo_traj, 'postrelax_ligand_rmsd': postrelax_ligand_rmsd_traj, 'fastrelax_sap_score_mean': sap_score_traj}
 
 def update_trajectory_plotting(trajectory_plots:dict, df:pd.DataFrame, cycle:int):
     for traj in trajectory_plots:
@@ -186,6 +187,7 @@ def add_final_data_to_trajectory_plots(df: pd.DataFrame, trajectory_plots):
     trajectory_plots['postrelax_catres_bb_rmsd'].add_and_plot(df['final_postrelax_catres_bb_rmsd'], "eval (AF2)")
     trajectory_plots['delta_apo_holo'].add_and_plot(df['final_delta_apo_holo'], "eval (AF2)")
     trajectory_plots['postrelax_ligand_rmsd'].add_and_plot(df['final_postrelax_ligand_rmsd'], "eval (AF2)")
+    trajectory_plots['fastrelax_sap_score_mean'].add_and_plot(df['final_fastrelax_sap_score_mean'], "eval (AF2)")
     return trajectory_plots
 
 def create_ref_results_dir(poses, dir:str, cycle:int):
@@ -194,10 +196,10 @@ def create_ref_results_dir(poses, dir:str, cycle:int):
     os.makedirs(dir, exist_ok=True)
 
     logging.info(f"Plotting outputs of cycle {cycle}.")
-    cols = [f"cycle_{cycle}_esm_plddt", f"cycle_{cycle}_esm_backbone_rmsd", f"cycle_{cycle}_esm_catres_heavy_rmsd", f"cycle_{cycle}_fastrelax_total_score", f"cycle_{cycle}_postrelax_ligand_rmsd"]
-    titles = ["ESMFold pLDDT", "ESMFold BB-Ca RMSD", "ESMFold Sidechain\nRMSD", "Rosetta total_score", "Postrelax ligand RMSD"]
-    y_labels = ["pLDDT", "Angstrom", "Angstrom", "[REU]", "Angstrom"]
-    dims = [(0,100), (0,5), (0,5), None, (0,5)]
+    cols = [f"cycle_{cycle}_esm_plddt", f"cycle_{cycle}_esm_backbone_rmsd", f"cycle_{cycle}_esm_catres_heavy_rmsd", f"cycle_{cycle}_fastrelax_total_score", f"cycle_{cycle}_postrelax_ligand_rmsd", f"cycle_{cycle}_fastrelax_sap_score_mean"]
+    titles = ["ESMFold pLDDT", "ESMFold BB-Ca RMSD", "ESMFold Sidechain\nRMSD", "Rosetta total_score", "Postrelax ligand RMSD", "Spatial Aggregation Propensity"]
+    y_labels = ["pLDDT", "Angstrom", "Angstrom", "[REU]", "Angstrom", "AU"]
+    dims = [(0,100), (0,5), (0,5), None, (0,5), None]
 
     # plot results
     plots.violinplot_multiple_cols(
@@ -233,10 +235,10 @@ def create_final_results_dir(poses, dir:str):
     os.makedirs(dir, exist_ok=True)
 
     logging.info(f"Plotting final outputs.")
-    cols = ["final_AF2_plddt", "final_AF2_mean_plddt", "final_AF2_backbone_rmsd", "final_AF2_catres_heavy_rmsd", "final_fastrelax_total_score", "final_postrelax_catres_heavy_rmsd", "final_postrelax_catres_bb_rmsd", "final_delta_apo_holo", "final_AF2_catres_heavy_rmsd_mean", "final_postrelax_catres_heavy_rmsd_mean", "final_postrelax_ligand_rmsd", "final_postrelax_ligand_rmsd_mean"]
-    titles = ["AF2 pLDDT", "AF2 pLDDT", "AF2 BB-Ca RMSD", "AF2 Sidechain\nRMSD", "Rosetta total_score", "Relaxed Sidechain\nRMSD", "Relaxed BB-Ca RMSD", "Delta Apo Holo", "Mean AF2 Sidechain\nRMSD", "Mean Relaxed Sidechain\nRMSD", "Postrelax Ligand\nRMSD", "Mean Postrelax Ligand\nRMSD"]
-    y_labels = ["pLDDT", "pLDDT", "Angstrom", "Angstrom", "[REU]", "Angstrom", "Angstrom", "[REU]", "Angstrom", "Angstrom", "Angstrom", "Angstrom"]
-    dims = [(0,100), (0,100), (0,5), (0,5), None, (0,5), (0,5), None, (0,5), (0,5), (0,5), (0,5)]
+    cols = ["final_AF2_plddt", "final_AF2_mean_plddt", "final_AF2_backbone_rmsd", "final_AF2_catres_heavy_rmsd", "final_fastrelax_total_score", "final_postrelax_catres_heavy_rmsd", "final_postrelax_catres_bb_rmsd", "final_delta_apo_holo", "final_AF2_catres_heavy_rmsd_mean", "final_postrelax_catres_heavy_rmsd_mean", "final_postrelax_ligand_rmsd", "final_postrelax_ligand_rmsd_mean", "final_fastrelax_sap_score_mean"]
+    titles = ["AF2 pLDDT", "AF2 pLDDT", "AF2 BB-Ca RMSD", "AF2 Sidechain\nRMSD", "Rosetta total_score", "Relaxed Sidechain\nRMSD", "Relaxed BB-Ca RMSD", "Delta Apo Holo", "Mean AF2 Sidechain\nRMSD", "Mean Relaxed Sidechain\nRMSD", "Postrelax Ligand\nRMSD", "Mean Postrelax Ligand\nRMSD", "SAP score"]
+    y_labels = ["pLDDT", "pLDDT", "Angstrom", "Angstrom", "[REU]", "Angstrom", "Angstrom", "[REU]", "Angstrom", "Angstrom", "Angstrom", "Angstrom", "Spatial Aggregation Propensity"]
+    dims = [(0,100), (0,100), (0,5), (0,5), None, (0,5), (0,5), None, (0,5), (0,5), (0,5), (0,5), None]
 
     # plot results
     plots.violinplot_multiple_cols(
@@ -1153,7 +1155,7 @@ def main(args):
             backbones = catres_motif_heavy_rmsd.run(poses = backbones, prefix = f"cycle_{cycle}_postrelax_catres_heavy")
             backbones = catres_motif_bb_rmsd.run(poses = backbones, prefix = f"cycle_{cycle}_postrelax_catres_bb")
             backbones = ligand_rmsd.run(poses = backbones, prefix = f"cycle_{cycle}_postrelax_ligand")
-            backbones= calculate_mean_scores(poses=backbones, scores=[f"cycle_{cycle}_postrelax_catres_heavy_rmsd", f"cycle_{cycle}_postrelax_catres_bb_rmsd", f"cycle_{cycle}_postrelax_ligand_rmsd"], remove_layers=1)
+            backbones= calculate_mean_scores(poses=backbones, scores=[f"cycle_{cycle}_postrelax_catres_heavy_rmsd", f"cycle_{cycle}_postrelax_catres_bb_rmsd", f"cycle_{cycle}_postrelax_ligand_rmsd", f"cycle_{cycle}_fastrelax_sap_score"], remove_layers=1)
 
             # filter backbones down to relax input backbones
             backbones.filter_poses_by_rank(n=1, score_col=f"cycle_{cycle}_fastrelax_total_score", remove_layers=1)
@@ -1172,8 +1174,8 @@ def main(args):
             logging.info("Calculating composite score for refinement evaluation...")
             backbones.calculate_composite_score(
                 name=f"cycle_{cycle}_refinement_composite_score",
-                scoreterms=[f"cycle_{cycle}_esm_plddt", f"cycle_{cycle}_esm_tm_TM_score_ref", f"cycle_{cycle}_esm_catres_bb_rmsd", f"cycle_{cycle}_esm_catres_heavy_rmsd", f"cycle_{cycle}_delta_apo_holo", f"cycle_{cycle}_postrelax_ligand_rmsd", f"cycle_{cycle}_postrelax_catres_heavy_rmsd"],
-                weights=[-1, -1, 4, 4, 1, 1, 1],
+                scoreterms=[f"cycle_{cycle}_esm_plddt", f"cycle_{cycle}_esm_tm_TM_score_ref", f"cycle_{cycle}_esm_catres_bb_rmsd", f"cycle_{cycle}_esm_catres_heavy_rmsd", f"cycle_{cycle}_delta_apo_holo", f"cycle_{cycle}_postrelax_ligand_rmsd", f"cycle_{cycle}_postrelax_catres_heavy_rmsd", f"cycle_{cycle}_fastrelax_sap_score_mean"],
+                weights=[-1, -1, 4, 4, 1, 1, 1, 0.5],
                 plot=True
             )
 
@@ -1219,7 +1221,7 @@ def main(args):
 
     ########################### FINAL EVALUATION ###########################
     if args.eval_prefix: eval_prefix = f"{args.eval_prefix}_"
-    else: eval_prefix = ref_prefix if ref_prefix else ""
+    else: eval_prefix = args.ref_prefix if args.ref_prefix else ""
 
     # set up poses for evaluation
     if args.eval_input_json:
@@ -1298,7 +1300,7 @@ def main(args):
     backbones = calculate_mean_scores(poses=backbones, scores=["final_AF2_catres_heavy_rmsd", "final_AF2_catres_bb_rmsd", "final_AF2_backbone_rmsd", "final_AF2_tm_TM_score_ref"], remove_layers=1 if not args.attnpacker_repack else 2)
     
     # filter for AF2 top model
-    backbones.filter_poses_by_rank(n=1, score_col="final_AF2_plddt", remove_layers=1 if not args.attnpacker_repack else 2)
+    backbones.filter_poses_by_rank(n=1, score_col="final_AF2_plddt", ascending=False, remove_layers=1 if not args.attnpacker_repack else 2)
 
     # calculate ligand clashes and ligand contacts
     backbones = ligand_clash.run(poses=backbones, prefix="final_AF2_ligand")
@@ -1320,7 +1322,7 @@ def main(args):
 
 
     # average values for all relaxed poses
-    backbones = calculate_mean_scores(poses=backbones, scores=["final_postrelax_catres_heavy_rmsd", "final_postrelax_catres_bb_rmsd", "final_postrelax_ligand_rmsd"], remove_layers=1)
+    backbones = calculate_mean_scores(poses=backbones, scores=["final_postrelax_catres_heavy_rmsd", "final_postrelax_catres_bb_rmsd", "final_postrelax_ligand_rmsd", "final_fastrelax_sap_score"], remove_layers=1)
     
     # plot mean results
     plots.violinplot_multiple_cols(
@@ -1354,19 +1356,22 @@ def main(args):
     # calculate final composite score
     backbones.calculate_composite_score(
         name=f"final_composite_score",
-        scoreterms=["final_AF2_plddt", "final_AF2_tm_TM_score_ref", "final_AF2_catres_bb_rmsd", "final_AF2_catres_heavy_rmsd", "final_delta_apo_holo", "final_postrelax_ligand_rmsd", "final_postrelax_catres_heavy_rmsd"],
-        weights=[-1, -1, 4, 4, 1, 1, 1],
+        scoreterms=["final_AF2_plddt", "final_AF2_tm_TM_score_ref", "final_AF2_catres_bb_rmsd", "final_AF2_catres_heavy_rmsd", "final_delta_apo_holo", "final_postrelax_ligand_rmsd", "final_postrelax_catres_heavy_rmsd", "final_fastrelax_sap_score_mean"],
+        weights=[-1, -1, 4, 4, 1, 1, 1, 0.5],
         plot=True
     )
 
-    # apply filters only after calculating composite scores!
-    backbones.filter_poses_by_value(score_col="final_AF2_mean_plddt", value=args.ref_plddt_cutoff_end, operator=">=", prefix="final_AF2_plddt", plot=True)
-    backbones.filter_poses_by_value(score_col="final_AF2_tm_TM_score_ref", value=0.9, operator=">=", prefix=f"final_AF2_TM_score", plot=True)
-    backbones.filter_poses_by_value(score_col="final_AF2_catres_bb_rmsd_mean", value=args.ref_catres_bb_rmsd_cutoff_end, operator="<=", prefix=f"final_AF2_catres_bb_rmsd", plot=True)
-    backbones.filter_poses_by_value(score_col="final_postrelax_ligand_rmsd_mean", value=args.ref_ligand_rmsd_end, operator="<=", prefix="final_ligand_rmsd", plot=True)        
-    backbones.filter_poses_by_value(score_col="final_AF2_ESM_bb_rmsd", value=1.5, operator="<=", prefix="final_AF2_ESM_bb_rmsd", plot=True) # check if AF2 and ESM predictions agree      
+    # filter output on mean scores
+    backbones.filter_poses_by_value(score_col="final_AF2_mean_plddt", value=args.eval_mean_plddt_cutoff, operator=">=", prefix="final_AF2_mean_plddt", plot=True)
+    backbones.filter_poses_by_value(score_col="final_AF2_catres_bb_rmsd_mean", value=args.eval_mean_catres_bb_rmsd_cutoff, operator="<=", prefix=f"final_AF2_mean_catres_bb_rmsd", plot=True)
+    backbones.filter_poses_by_value(score_col="final_postrelax_ligand_rmsd_mean", value=args.eval_mean_ligand_rmsd_cutoff, operator="<=", prefix="final_mean_ligand_rmsd", plot=True)        
 
-    #backbones.filter_poses_by_value(score_col="final_ligand_bb_clashes", value=1, operator="<")
+    # filter output on top pose
+    backbones.filter_poses_by_value(score_col="final_AF2_plddt", value=args.eval_plddt_cutoff, operator=">=", prefix="final_AF2_plddt", plot=True)
+    backbones.filter_poses_by_value(score_col="final_AF2_tm_TM_score_ref", value=0.9, operator=">=", prefix=f"final_AF2_TM_score", plot=True)
+    backbones.filter_poses_by_value(score_col="final_AF2_ESM_bb_rmsd", value=2.0, operator="<=", prefix="final_AF2_ESM_bb_rmsd", plot=True) # check if AF2 and ESM predictions agree      
+    backbones.filter_poses_by_value(score_col="final_postrelax_ligand_rmsd", value=args.eval_ligand_rmsd_cutoff, operator="<=", prefix="final_ligand_rmsd", plot=True)        
+    backbones.filter_poses_by_value(score_col="final_AF2_catres_bb_rmsd", value=args.eval_catres_bb_rmsd_cutoff, operator="<=", prefix=f"final_AF2_catres_bb_rmsd", plot=True)
 
     backbones.reindex_poses(prefix="final_reindex", remove_layers=2 if not args.attnpacker_repack else 3)
     #backbones.filter_poses_by_rank(n=25, score_col='final_composite_score', prefix="final_composite_score", plot=True)
@@ -1625,11 +1630,11 @@ def main(args):
         )
 
         # apply filters only after calculating composite scores!
-        backbones.filter_poses_by_value(score_col="variants_AF2_mean_plddt", value=args.ref_plddt_cutoff_end, operator=">=", prefix="variants_AF2_plddt", plot=True)
+        backbones.filter_poses_by_value(score_col="variants_AF2_mean_plddt", value=args.eval_mean_plddt_cutoff, operator=">=", prefix="variants_AF2_plddt", plot=True)
         backbones.filter_poses_by_value(score_col="variants_AF2_tm_TM_score_ref", value=0.9, operator=">=", prefix=f"variants_AF2_TM_score", plot=True)
-        backbones.filter_poses_by_value(score_col="variants_AF2_catres_bb_rmsd_mean", value=args.ref_catres_bb_rmsd_cutoff_end, operator="<=", prefix=f"variants_AF2_catres_bb_rmsd", plot=True)
-        backbones.filter_poses_by_value(score_col="variants_AF2_postrelax_ligand_rmsd_mean", value=args.ref_ligand_rmsd_end, operator="<=", prefix="variants_ligand_rmsd", plot=True)        
-        backbones.filter_poses_by_value(score_col="variants_AF2_ESM_bb_rmsd", value=1.5, operator="<=", prefix="variants_AF2_ESM_bb_rmsd", plot=True) # check if AF2 and ESM predictions agree      
+        backbones.filter_poses_by_value(score_col="variants_AF2_catres_bb_rmsd_mean", value=args.eval_mean_catres_bb_rmsd_cutoff, operator="<=", prefix=f"variants_AF2_catres_bb_rmsd", plot=True)
+        backbones.filter_poses_by_value(score_col="variants_AF2_postrelax_ligand_rmsd_mean", value=args.eval_mean_ligand_rmsd_cutoff, operator="<=", prefix="variants_ligand_rmsd", plot=True)        
+        backbones.filter_poses_by_value(score_col="variants_AF2_ESM_bb_rmsd", value=2.0, operator="<=", prefix="variants_AF2_ESM_bb_rmsd", plot=True) # check if AF2 and ESM predictions agree      
 
         backbones.reindex_poses(prefix="variants_final_reindex", remove_layers=2 if not args.attnpacker_repack else 3)
         #backbones.filter_poses_by_rank(n=25, score_col='final_composite_score', prefix="final_composite_score", plot=True)
@@ -1693,6 +1698,12 @@ if __name__ == "__main__":
     argparser.add_argument("--eval_input_json", type=str, default=None, help="Read in a custom poses json containing input poses for evaluation.")
     argparser.add_argument("--eval_input_poses", type=int, default=None, help="Maximum number of input poses for evaluation with AF2 after refinement. Poses will be filtered by design_composite_score.")
     argparser.add_argument("--eval_input_poses_per_bb", type=int, default=5, help="Maximum number of input poses per unique diffusion backbone for evaluation with AF2 after refinement. Poses will be filtered by design_composite_score")
+    argparser.add_argument("--eval_mean_plddt_cutoff", type=float, default=80, help="Read in a custom csv containing poses description and mutation columns.")
+    argparser.add_argument("--eval_mean_catres_bb_rmsd_cutoff", type=float, default=1.0, help="Read in a custom csv containing poses description and mutation columns.")
+    argparser.add_argument("--eval_mean_ligand_rmsd_cutoff", type=int, default=2.5, help="Read in a custom csv containing poses description and mutation columns.")
+    argparser.add_argument("--eval_plddt_cutoff", type=float, default=85, help="Read in a custom csv containing poses description and mutation columns.")
+    argparser.add_argument("--eval_catres_bb_rmsd_cutoff", type=float, default=0.6, help="Read in a custom csv containing poses description and mutation columns.")
+    argparser.add_argument("--eval_ligand_rmsd_cutoff", type=int, default=2, help="Read in a custom csv containing poses description and mutation columns.")
 
     # variant generation
     argparser.add_argument("--variants_prefix", type=str, default=None, help="Prefix for variant generation runs for testing different variants.")
