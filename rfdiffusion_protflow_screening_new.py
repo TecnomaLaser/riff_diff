@@ -1125,10 +1125,15 @@ def main(args):
                 options = fr_options
             )
 
+            apo_backbones = catres_motif_heavy_rmsd.run(poses = apo_backbones, prefix = f"cycle_{cycle}_postrelax_apo_catres_heavy")
+            apo_backbones = catres_motif_bb_rmsd.run(poses = apo_backbones, prefix = f"cycle_{cycle}_postrelax_apo_catres_bb")
+            apo_backbones= calculate_mean_scores(poses=apo_backbones, scores=[f"cycle_{cycle}_postrelax_apo_catres_heavy_rmsd", f"cycle_{cycle}_postrelax_apo_catres_bb_rmsd"],  remove_layers=1)
+
             # filter for top relaxed apo pose and merge with original dataframe
             logging.info("Selecting top poses for each relaxed structure...")
             apo_backbones.filter_poses_by_rank(n=1, score_col=f"cycle_{cycle}_fastrelax_apo_total_score", remove_layers=1)
-            backbones.df = backbones.df.merge(apo_backbones.df[[f'cycle_{cycle}_rlx_description', f"cycle_{cycle}_fastrelax_apo_total_score"]], on=f'cycle_{cycle}_rlx_description')
+            preserve_cols = [f'cycle_{cycle}_rlx_description', f"cycle_{cycle}_fastrelax_apo_total_score", f"cycle_{cycle}_postrelax_apo_catres_heavy_rmsd", f"cycle_{cycle}_postrelax_apo_catres_heavy_rmsd_mean", f"cycle_{cycle}_postrelax_apo_catres_bb_rmsd", f"cycle_{cycle}_postrelax_apo_catres_bb_rmsd_mean"]
+            backbones.df = backbones.df.merge(apo_backbones.df[preserve_cols], on=f'cycle_{cycle}_rlx_description')
 
             # add ligand to poses
             logging.info("Adding ligand to ESMFold predictions...")
@@ -1178,8 +1183,8 @@ def main(args):
             logging.info("Calculating composite score for refinement evaluation...")
             backbones.calculate_composite_score(
                 name=f"cycle_{cycle}_refinement_composite_score",
-                scoreterms=[f"cycle_{cycle}_esm_plddt", f"cycle_{cycle}_esm_tm_TM_score_ref", f"cycle_{cycle}_esm_catres_bb_rmsd", f"cycle_{cycle}_esm_catres_heavy_rmsd", f"cycle_{cycle}_delta_apo_holo", f"cycle_{cycle}_postrelax_ligand_rmsd", f"cycle_{cycle}_postrelax_catres_heavy_rmsd", f"cycle_{cycle}_fastrelax_sap_score_mean"],
-                weights=[-1, -1, 4, 4, 1, 1, 1, 0.5],
+                scoreterms=[f"cycle_{cycle}_esm_plddt", f"cycle_{cycle}_esm_tm_TM_score_ref", f"cycle_{cycle}_esm_catres_bb_rmsd", f"cycle_{cycle}_esm_catres_heavy_rmsd", f"cycle_{cycle}_delta_apo_holo", f"cycle_{cycle}_postrelax_ligand_rmsd", f"cycle_{cycle}_postrelax_catres_heavy_rmsd", f"cycle_{cycle}_fastrelax_sap_score_mean", f"cycle_{cycle}_postrelax_apo_catres_heavy_rmsd"],
+                weights=[-2, -2, 8, 6, 2, 2, 1, 1, 1],
                 plot=True
             )
 
@@ -1349,12 +1354,14 @@ def main(args):
     )
 
     # calculate apo relaxed rmsds
-    apo_backbones = catres_motif_heavy_rmsd.run(poses = backbones, prefix = f"final_postrelax_apo_catres_heavy")
-    apo_backbones = catres_motif_bb_rmsd.run(poses = backbones, prefix = f"final_postrelax_apo_catres_bb")
+    apo_backbones = catres_motif_heavy_rmsd.run(poses = apo_backbones, prefix = f"final_postrelax_apo_catres_heavy")
+    apo_backbones = catres_motif_bb_rmsd.run(poses = apo_backbones, prefix = f"final_postrelax_apo_catres_bb")
+    apo_backbones = calculate_mean_scores(poses=apo_backbones, scores=["final_postrelax_apo_catres_heavy_rmsd", "final_postrelax_apo_catres_bb_rmsd"], remove_layers=1)
 
     # filter to relaxed pose with best score, merge dataframes
     apo_backbones.filter_poses_by_rank(n=1, score_col="final_fastrelax_apo_total_score", remove_layers=1)
-    backbones.df = backbones.df.merge(apo_backbones.df[['final_relax_input_description', 'final_fastrelax_apo_total_score']], on='final_relax_input_description')
+    preserve_cols = ['final_relax_input_description', 'final_fastrelax_apo_total_score', 'final_postrelax_apo_catres_heavy_rmsd', 'final_postrelax_apo_catres_heavy_rmsd_mean', 'final_postrelax_apo_catres_bb_rmsd', 'final_postrelax_apo_catres_bb_rmsd_mean']
+    backbones.df = backbones.df.merge(apo_backbones.df[preserve_cols], on='final_relax_input_description')
     
     # calculate delta score between apo and holo poses
     backbones.df['final_delta_apo_holo'] = backbones.df['final_fastrelax_total_score'] - backbones.df['final_fastrelax_apo_total_score']
@@ -1366,17 +1373,17 @@ def main(args):
     # calculate final composite score
     backbones.calculate_composite_score(
         name=f"final_composite_score",
-        scoreterms=["final_AF2_plddt", "final_AF2_tm_TM_score_ref", "final_AF2_catres_bb_rmsd", "final_AF2_catres_heavy_rmsd", "final_delta_apo_holo", "final_postrelax_ligand_rmsd", "final_postrelax_catres_heavy_rmsd", "final_fastrelax_sap_score_mean"],
-        weights=[-1, -1, 4, 4, 1, 1, 1, 0.5],
+        scoreterms=["final_AF2_plddt", "final_AF2_tm_TM_score_ref", "final_AF2_catres_bb_rmsd", "final_AF2_catres_heavy_rmsd", "final_delta_apo_holo", "final_postrelax_ligand_rmsd", "final_postrelax_catres_heavy_rmsd", "final_fastrelax_sap_score_mean", "final_postrelax_apo_catres_heavy_rmsd"],
+        weights=[-2, -2, 8, 6, 2, 2, 1, 1, 1],
         plot=True
     )
  
     # plot mean results
     plots.violinplot_multiple_cols(
         dataframe=backbones.df,
-        cols=["final_AF2_catres_heavy_rmsd_mean", "final_AF2_catres_bb_rmsd_mean", "final_postrelax_catres_heavy_rmsd_mean", "final_postrelax_catres_bb_rmsd_mean", "final_postrelax_ligand_rmsd_mean"],
+        cols=["final_AF2_catres_heavy_rmsd_mean", "final_AF2_catres_bb_rmsd_mean", "final_postrelax_catres_heavy_rmsd_mean", "final_postrelax_catres_bb_rmsd_mean", "final_postrelax_ligand_rmsd_mean", "final_postrelax_apo_catres_heavy_rmsd_mean"],
         y_labels=["Angstrom", "Angstrom", "Angstrom", "Angstrom", "Angstrom", "Angstrom"],
-        titles=["Mean AF2\nSidechain RMSD", "Mean AF2 catres\nBB RMSD", "Mean Relaxed\nSidechain RMSD", "Mean Relaxed catres\nBB RMSD", "Mean Relaxed ligand\nRMSD"],
+        titles=["Mean AF2\nSidechain RMSD", "Mean AF2 catres\nBB RMSD", "Mean Relaxed\nSidechain RMSD", "Mean Relaxed catres\nBB RMSD", "Mean Relaxed ligand\nRMSD", "Mean Apo Relaxed\nSidechain RMSD"],
         out_path=os.path.join(backbones.plots_dir, "final_mean_rmsds.png"),
         show_fig=False
     )
@@ -1706,12 +1713,12 @@ if __name__ == "__main__":
     argparser.add_argument("--eval_input_json", type=str, default=None, help="Read in a custom poses json containing input poses for evaluation.")
     argparser.add_argument("--eval_input_poses", type=int, default=None, help="Maximum number of input poses for evaluation with AF2 after refinement. Poses will be filtered by design_composite_score.")
     argparser.add_argument("--eval_input_poses_per_bb", type=int, default=5, help="Maximum number of input poses per unique diffusion backbone for evaluation with AF2 after refinement. Poses will be filtered by design_composite_score")
-    argparser.add_argument("--eval_mean_plddt_cutoff", type=float, default=80, help="Read in a custom csv containing poses description and mutation columns.")
-    argparser.add_argument("--eval_mean_catres_bb_rmsd_cutoff", type=float, default=1.0, help="Read in a custom csv containing poses description and mutation columns.")
-    argparser.add_argument("--eval_mean_ligand_rmsd_cutoff", type=int, default=2.5, help="Read in a custom csv containing poses description and mutation columns.")
-    argparser.add_argument("--eval_plddt_cutoff", type=float, default=85, help="Read in a custom csv containing poses description and mutation columns.")
-    argparser.add_argument("--eval_catres_bb_rmsd_cutoff", type=float, default=0.6, help="Read in a custom csv containing poses description and mutation columns.")
-    argparser.add_argument("--eval_ligand_rmsd_cutoff", type=int, default=2, help="Read in a custom csv containing poses description and mutation columns.")
+    argparser.add_argument("--eval_mean_plddt_cutoff", type=float, default=80, help="Cutoff for mean plddt over all AF2 models of each pose.")
+    argparser.add_argument("--eval_mean_catres_bb_rmsd_cutoff", type=float, default=1.0, help="Cutoff for mean catres backbone rmsd over all AF2 models of each pose.")
+    argparser.add_argument("--eval_mean_ligand_rmsd_cutoff", type=int, default=2.5, help="Cutoff for mean ligand rmsd over all relaxed models of the top AF2 model for each pose.")
+    argparser.add_argument("--eval_plddt_cutoff", type=float, default=85, help="Cutoff for plddt for the AF2 top model for each pose.")
+    argparser.add_argument("--eval_catres_bb_rmsd_cutoff", type=float, default=0.6, help="Cutoff for catres backbone rmsd for the AF2 top model for each pose.")
+    argparser.add_argument("--eval_ligand_rmsd_cutoff", type=int, default=2, help="Cutoff for ligand rmsd for the top relaxed model of the top AF2 model for each pose.")
 
     # variant generation
     argparser.add_argument("--variants_prefix", type=str, default=None, help="Prefix for variant generation runs for testing different variants.")
