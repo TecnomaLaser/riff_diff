@@ -236,8 +236,8 @@ def create_final_results_dir(poses, dir:str):
 
     logging.info(f"Plotting final outputs.")
     cols = ["final_AF2_plddt", "final_AF2_mean_plddt", "final_AF2_backbone_rmsd", "final_AF2_catres_heavy_rmsd", "final_fastrelax_total_score", "final_postrelax_catres_heavy_rmsd", "final_postrelax_catres_bb_rmsd", "final_delta_apo_holo", "final_AF2_catres_heavy_rmsd_mean", "final_postrelax_catres_heavy_rmsd_mean", "final_postrelax_ligand_rmsd", "final_postrelax_ligand_rmsd_mean", "final_fastrelax_sap_score_mean"]
-    titles = ["AF2 pLDDT", "AF2 pLDDT", "AF2 BB-Ca RMSD", "AF2 Sidechain\nRMSD", "Rosetta total_score", "Relaxed Sidechain\nRMSD", "Relaxed BB-Ca RMSD", "Delta Apo Holo", "Mean AF2 Sidechain\nRMSD", "Mean Relaxed Sidechain\nRMSD", "Postrelax Ligand\nRMSD", "Mean Postrelax Ligand\nRMSD", "SAP score"]
-    y_labels = ["pLDDT", "pLDDT", "Angstrom", "Angstrom", "[REU]", "Angstrom", "Angstrom", "[REU]", "Angstrom", "Angstrom", "Angstrom", "Angstrom", "Spatial Aggregation Propensity"]
+    titles = ["AF2 pLDDT", "mean AF2 pLDDT", "AF2 BB-Ca RMSD", "AF2 Sidechain\nRMSD", "Rosetta total_score", "Relaxed Sidechain\nRMSD", "Relaxed BB-Ca RMSD", "Delta Apo Holo", "Mean AF2 Sidechain\nRMSD", "Mean Relaxed Sidechain\nRMSD", "Postrelax Ligand\nRMSD", "Mean Postrelax Ligand\nRMSD", "Spatial Aggregation\nPropensity"]
+    y_labels = ["pLDDT", "pLDDT", "Angstrom", "Angstrom", "[REU]", "Angstrom", "Angstrom", "[REU]", "Angstrom", "Angstrom", "Angstrom", "Angstrom", "SAP score"]
     dims = [(0,100), (0,100), (0,5), (0,5), None, (0,5), (0,5), None, (0,5), (0,5), (0,5), (0,5), None]
 
     # plot results
@@ -379,7 +379,6 @@ def combine_screening_results(dir: str, prefixes: list, scores: list, weights: l
     poses.df.sort_values("design_composite_score", ascending=True, inplace=True)
     poses.df.reset_index(drop=True, inplace=True)
     poses.save_scores(out_path=os.path.join(out_dir, 'screening_results_all.json'))
-    poses.save_scores(out_path=os.path.join(out_dir, 'refinement_input_poses.csv'), out_format="csv")
 
     logging.info(f"Writing pymol alignment script for screening results at {out_dir}")
     write_pymol_alignment_script(
@@ -540,7 +539,7 @@ def main(args):
     ############################################## SCREENING ######################################################
 
 
-    if not args.ref_input_json and not args.eval_input_json:
+    if not args.ref_input_json and not args.eval_input_json and not args.variants_input_json:
         screening_dir = os.path.join(args.output_dir, "screening")
         os.makedirs(screening_dir, exist_ok=True)
         # load poses
@@ -971,7 +970,7 @@ def main(args):
             sys.exit(1)
     
     ############################################# REFINEMENT ########################################################
-    if args.ref_input_json or (not args.ref_input_json and not args.eval_input_json):
+    if args.ref_input_json or (not args.ref_input_json and not args.eval_input_json and not args.variants_input_json):
         ref_prefix = f"{args.ref_prefix}_" if args.ref_prefix else ""
 
         refinement_dir = os.path.join(args.output_dir, f"{ref_prefix}refinement")
@@ -1184,7 +1183,7 @@ def main(args):
             backbones.calculate_composite_score(
                 name=f"cycle_{cycle}_refinement_composite_score",
                 scoreterms=[f"cycle_{cycle}_esm_plddt", f"cycle_{cycle}_esm_tm_TM_score_ref", f"cycle_{cycle}_esm_catres_bb_rmsd", f"cycle_{cycle}_esm_catres_heavy_rmsd", f"cycle_{cycle}_delta_apo_holo", f"cycle_{cycle}_postrelax_ligand_rmsd", f"cycle_{cycle}_postrelax_catres_heavy_rmsd", f"cycle_{cycle}_fastrelax_sap_score_mean", f"cycle_{cycle}_postrelax_apo_catres_heavy_rmsd"],
-                weights=[-2, -2, 8, 6, 2, 2, 1, 1, 1],
+                weights=[-2, -2, 8, 4, 2, 2, 2, 1, 2],
                 plot=True
             )
 
@@ -1220,7 +1219,7 @@ def main(args):
 
         refinement_results_dir = os.path.join(args.output_dir, f"{ref_prefix}refinement_results")
         create_ref_results_dir(poses=backbones, dir=refinement_results_dir, cycle=cycle)
-        backbones.save_scores(out_path=os.path.join(refinement_results_dir, "evaluation_input_poses.json"), out_format="json")
+        backbones.save_scores(out_path=os.path.join(refinement_results_dir, f"results_{ref_prefix}_refinement"))
         backbones.set_work_dir(args.output_dir)
         backbones.save_scores()
 
@@ -1229,180 +1228,181 @@ def main(args):
             sys.exit(1)
 
     ########################### FINAL EVALUATION ###########################
-    if args.eval_prefix: eval_prefix = f"{args.eval_prefix}_"
-    else: eval_prefix = args.ref_prefix if args.ref_prefix else ""
+    if args.eval_input_json or not args.variants_input_json:
+        if args.eval_prefix: eval_prefix = f"{args.eval_prefix}_"
+        else: eval_prefix = args.ref_prefix if args.ref_prefix else ""
 
-    # set up poses for evaluation
-    if args.eval_input_json:
-        logging.info(f"Reading in evaluation input poses from {args.eval_input_json}!")
-        backbones = protflow.poses.Poses(poses=args.eval_input_json)
-        logging.warning(f"Using data from refinement cycle {args.ref_cycles}. Make sure this is the correct one when reading in evaluation input poses from file!")
-        for res_col in residue_cols:
-            backbones.df[res_col] = [protflow.residues.ResidueSelection(motif, from_scorefile=True) for motif in backbones.df[res_col].to_list()]
+        # set up poses for evaluation
+        if args.eval_input_json:
+            logging.info(f"Reading in evaluation input poses from {args.eval_input_json}!")
+            backbones = protflow.poses.Poses(poses=args.eval_input_json)
+            logging.warning(f"Using data from refinement cycle {args.ref_cycles}. Make sure this is the correct one when reading in evaluation input poses from file!")
+            for res_col in residue_cols:
+                backbones.df[res_col] = [protflow.residues.ResidueSelection(motif, from_scorefile=True) for motif in backbones.df[res_col].to_list()]
 
-    backbones.set_work_dir(os.path.join(args.output_dir, f"{eval_prefix}evaluation"))
+        backbones.set_work_dir(os.path.join(args.output_dir, f"{eval_prefix}evaluation"))
 
-    if args.eval_input_poses_per_bb:
-        logging.info(f"Filtering evaluation input poses on per backbone level according to cycle_{args.ref_cycles}_refinement_composite_score...")
-        backbones.filter_poses_by_rank(n=args.eval_input_poses_per_bb, score_col=f"cycle_{args.ref_cycles}_refinement_composite_score", remove_layers=1, prefix="evaluation_input_per_bb", plot=True)
-    if args.eval_input_poses: 
-        logging.info(f"Filtering evaluation input poses according to cycle_{args.ref_cycles}_refinement_composite_score...")
-        backbones.filter_poses_by_rank(n=args.eval_input_poses, score_col=f"cycle_{args.ref_cycles}_refinement_composite_score", prefix="evaluation_input", plot=True)
+        if args.eval_input_poses_per_bb:
+            logging.info(f"Filtering evaluation input poses on per backbone level according to cycle_{args.ref_cycles}_refinement_composite_score...")
+            backbones.filter_poses_by_rank(n=args.eval_input_poses_per_bb, score_col=f"cycle_{args.ref_cycles}_refinement_composite_score", remove_layers=1, prefix="evaluation_input_per_bb", plot=True)
+        if args.eval_input_poses: 
+            logging.info(f"Filtering evaluation input poses according to cycle_{args.ref_cycles}_refinement_composite_score...")
+            backbones.filter_poses_by_rank(n=args.eval_input_poses, score_col=f"cycle_{args.ref_cycles}_refinement_composite_score", prefix="evaluation_input", plot=True)
 
-    evaluation_input_poses_dir = os.path.join(backbones.work_dir, "evaluation_input_poses")
-    os.makedirs(evaluation_input_poses_dir, exist_ok=True)
-    backbones.save_poses(out_path=evaluation_input_poses_dir)
-    backbones.save_poses(out_path=evaluation_input_poses_dir, poses_col="input_poses")
-    backbones.save_scores(out_path=evaluation_input_poses_dir)
+        evaluation_input_poses_dir = os.path.join(backbones.work_dir, "evaluation_input_poses")
+        os.makedirs(evaluation_input_poses_dir, exist_ok=True)
+        backbones.save_poses(out_path=evaluation_input_poses_dir)
+        backbones.save_poses(out_path=evaluation_input_poses_dir, poses_col="input_poses")
+        backbones.save_scores(out_path=evaluation_input_poses_dir)
 
-    # write pymol alignment script
-    logging.info(f"Writing pymol alignment script for evaluation input poses at {evaluation_input_poses_dir}.")
-    write_pymol_alignment_script(
-        df = backbones.df,
-        scoreterm = f"cycle_{args.ref_cycles}_refinement_composite_score",
-        top_n = np.min([len(backbones.df.index), 25]),
-        path_to_script = os.path.join(evaluation_input_poses_dir, "align_input_poses.pml"),
-        ref_motif_col = "template_fixedres",
-        ref_catres_col = "template_fixedres",
-        target_catres_col = "fixed_residues",
-        target_motif_col = "fixed_residues"
-    )
-
-    backbones.convert_pdb_to_fasta(prefix="final_fasta_conversion", update_poses=True)
-
-    # run AF2
-    backbones = colabfold.run(
-        poses=backbones,
-        prefix="final_AF2",
-        return_top_n_poses=5
-    )
-
-    backbones.filter_poses_by_value(score_col="final_AF2_mean_plddt", value=args.eval_mean_plddt_cutoff, operator=">=", prefix="final_AF2_mean_plddt", plot=True)
-
-    # calculate backbone rmsds
-    backbones = catres_motif_bb_rmsd.run(poses=backbones, prefix=f"final_AF2_catres_bb")
-    backbones = bb_rmsd.run(poses=backbones, prefix="final_AF2_backbone", ref_col=f"cycle_{args.ref_cycles}_bbopt_location")
-    backbones = bb_rmsd.run(poses=backbones, prefix="final_AF2_ESM_bb", ref_col=f"cycle_{args.ref_cycles}_esm_location")
-    backbones = tm_score_calculator.run(poses=backbones, prefix=f"final_AF2_tm", ref_col=f"cycle_{args.ref_cycles}_bbopt_location")
-    backbones = tm_score_calculator.run(poses=backbones, prefix=f"final_AF2_ESM_tm", ref_col=f"cycle_{args.ref_cycles}_esm_location")
-    backbones = calculate_mean_scores(poses=backbones, scores=["final_AF2_catres_bb_rmsd", "final_AF2_backbone_rmsd", "final_AF2_tm_TM_score_ref"], remove_layers=1)
-
-    backbones.filter_poses_by_value(score_col="final_AF2_catres_bb_rmsd_mean", value=args.eval_mean_catres_bb_rmsd_cutoff, operator="<=", prefix=f"final_AF2_mean_catres_bb_rmsd", plot=True)
-
-    if args.attnpacker_repack:
-        backbones = attnpacker.run(
-            poses=backbones,
-            prefix=f"final_packing"
+        # write pymol alignment script
+        logging.info(f"Writing pymol alignment script for evaluation input poses at {evaluation_input_poses_dir}.")
+        write_pymol_alignment_script(
+            df = backbones.df,
+            scoreterm = f"cycle_{args.ref_cycles}_refinement_composite_score",
+            top_n = np.min([len(backbones.df.index), 25]),
+            path_to_script = os.path.join(evaluation_input_poses_dir, "align_input_poses.pml"),
+            ref_motif_col = "template_fixedres",
+            ref_catres_col = "template_fixedres",
+            target_catres_col = "fixed_residues",
+            target_motif_col = "fixed_residues"
         )
 
-    backbones = catres_motif_heavy_rmsd.run(poses=backbones, prefix=f"final_AF2_catres_heavy")
-    backbones = calculate_mean_scores(poses=backbones, scores=["final_AF2_catres_heavy_rmsd"], remove_layers=1 if not args.attnpacker_repack else 2)
+        backbones.convert_pdb_to_fasta(prefix="final_fasta_conversion", update_poses=True)
 
-    # filter for AF2 top model
-    backbones.filter_poses_by_rank(n=1, score_col="final_AF2_plddt", ascending=False, remove_layers=1 if not args.attnpacker_repack else 2)
+        # run AF2
+        backbones = colabfold.run(
+            poses=backbones,
+            prefix="final_AF2",
+            return_top_n_poses=5
+        )
 
-    # apply rest of the filters
-    backbones.filter_poses_by_value(score_col="final_AF2_plddt", value=args.eval_plddt_cutoff, operator=">=", prefix="final_AF2_plddt", plot=True)
-    backbones.filter_poses_by_value(score_col="final_AF2_tm_TM_score_ref", value=0.9, operator=">=", prefix=f"final_AF2_TM_score", plot=True)
-    backbones.filter_poses_by_value(score_col="final_AF2_ESM_bb_rmsd", value=2.0, operator="<=", prefix="final_AF2_ESM_bb_rmsd", plot=True) # check if AF2 and ESM predictions agree      
-    backbones.filter_poses_by_value(score_col="final_AF2_catres_bb_rmsd", value=args.eval_catres_bb_rmsd_cutoff, operator="<=", prefix=f"final_AF2_catres_bb_rmsd", plot=True)
+        backbones.filter_poses_by_value(score_col="final_AF2_mean_plddt", value=args.eval_mean_plddt_cutoff, operator=">=", prefix="final_AF2_mean_plddt", plot=True)
 
-    # copy description column for merging with apo relaxed structures
-    backbones.df['final_relax_input_description'] = backbones.df['poses_description']
-    apo_backbones = copy.deepcopy(backbones)
+        # calculate backbone rmsds
+        backbones = catres_motif_bb_rmsd.run(poses=backbones, prefix=f"final_AF2_catres_bb")
+        backbones = bb_rmsd.run(poses=backbones, prefix="final_AF2_backbone", ref_col=f"cycle_{args.ref_cycles}_bbopt_location")
+        backbones = bb_rmsd.run(poses=backbones, prefix="final_AF2_ESM_bb", ref_col=f"cycle_{args.ref_cycles}_esm_location")
+        backbones = tm_score_calculator.run(poses=backbones, prefix=f"final_AF2_tm", ref_col=f"cycle_{args.ref_cycles}_bbopt_location")
+        backbones = tm_score_calculator.run(poses=backbones, prefix=f"final_AF2_ESM_tm", ref_col=f"cycle_{args.ref_cycles}_esm_location")
+        backbones = calculate_mean_scores(poses=backbones, scores=["final_AF2_catres_bb_rmsd", "final_AF2_backbone_rmsd", "final_AF2_tm_TM_score_ref"], remove_layers=1)
 
-    # add ligand chain 
-    backbones = chain_adder.superimpose_add_chain(
-        poses = backbones,
-        prefix = f"final_ligand",
-        ref_col = "updated_reference_frags_location",
-        target_motif = "fixed_residues",
-        copy_chain = args.ligand_chain
-    )
+        if args.attnpacker_repack:
+            backbones = attnpacker.run(
+                poses=backbones,
+                prefix=f"final_packing"
+            )
+
+        backbones = catres_motif_heavy_rmsd.run(poses=backbones, prefix=f"final_AF2_catres_heavy")
+        backbones = calculate_mean_scores(poses=backbones, scores=["final_AF2_catres_heavy_rmsd"], remove_layers=1 if not args.attnpacker_repack else 2)
+
+        # filter for AF2 top model
+        backbones.filter_poses_by_rank(n=1, score_col="final_AF2_plddt", ascending=False, remove_layers=1 if not args.attnpacker_repack else 2)
+
+        # apply rest of the filters
+        backbones.filter_poses_by_value(score_col="final_AF2_catres_bb_rmsd_mean", value=args.eval_mean_catres_bb_rmsd_cutoff, operator="<=", prefix=f"final_AF2_mean_catres_bb_rmsd", plot=True)
+        backbones.filter_poses_by_value(score_col="final_AF2_plddt", value=args.eval_plddt_cutoff, operator=">=", prefix="final_AF2_plddt", plot=True)
+        backbones.filter_poses_by_value(score_col="final_AF2_tm_TM_score_ref", value=0.9, operator=">=", prefix=f"final_AF2_TM_score", plot=True)
+        backbones.filter_poses_by_value(score_col="final_AF2_ESM_bb_rmsd", value=2.0, operator="<=", prefix="final_AF2_ESM_bb_rmsd", plot=True) # check if AF2 and ESM predictions agree      
+        backbones.filter_poses_by_value(score_col="final_AF2_catres_bb_rmsd", value=args.eval_catres_bb_rmsd_cutoff, operator="<=", prefix=f"final_AF2_catres_bb_rmsd", plot=True)
+
+        # copy description column for merging with apo relaxed structures
+        backbones.df['final_relax_input_description'] = backbones.df['poses_description']
+        apo_backbones = copy.deepcopy(backbones)
+
+        # add ligand chain 
+        backbones = chain_adder.superimpose_add_chain(
+            poses = backbones,
+            prefix = f"final_ligand",
+            ref_col = "updated_reference_frags_location",
+            target_motif = "fixed_residues",
+            copy_chain = args.ligand_chain
+        )
+        
+        # calculate ligand clashes and ligand contacts
+        backbones = ligand_clash.run(poses=backbones, prefix="final_AF2_ligand")
+        backbones = ligand_contacts.run(poses=backbones, prefix="final_AF2_lig")
+
+        # relax predictions with ligand present
+        backbones = rosetta.run(
+            poses = backbones,
+            prefix = "final_fastrelax",
+            rosetta_application="rosetta_scripts.default.linuxgccrelease",
+            nstruct = 10,
+            options = fr_options
+        )
+
+        # calculate RMSDs of relaxed poses
+        backbones = catres_motif_heavy_rmsd.run(poses = backbones, prefix = f"final_postrelax_catres_heavy")
+        backbones = catres_motif_bb_rmsd.run(poses = backbones, prefix = f"final_postrelax_catres_bb")
+        backbones = ligand_rmsd.run(poses = backbones, prefix = "final_postrelax_ligand")
+
+        # average values for all relaxed poses
+        backbones = calculate_mean_scores(poses=backbones, scores=["final_postrelax_catres_heavy_rmsd", "final_postrelax_catres_bb_rmsd", "final_postrelax_ligand_rmsd", "final_fastrelax_sap_score"], remove_layers=1)
+        
+        # filter to relaxed pose with best score
+        backbones.filter_poses_by_rank(n=1, score_col="final_fastrelax_total_score", remove_layers=1)
+
+        # relax apo poses
+        apo_backbones = rosetta.run(
+            poses = apo_backbones,
+            prefix = "final_fastrelax_apo",
+            rosetta_application="rosetta_scripts.default.linuxgccrelease",
+            nstruct = 10,
+            options = fr_options
+        )
+
+        # calculate apo relaxed rmsds
+        apo_backbones = catres_motif_heavy_rmsd.run(poses = apo_backbones, prefix = f"final_postrelax_apo_catres_heavy")
+        apo_backbones = catres_motif_bb_rmsd.run(poses = apo_backbones, prefix = f"final_postrelax_apo_catres_bb")
+        apo_backbones = calculate_mean_scores(poses=apo_backbones, scores=["final_postrelax_apo_catres_heavy_rmsd", "final_postrelax_apo_catres_bb_rmsd"], remove_layers=1)
+
+        # filter to relaxed pose with best score, merge dataframes
+        apo_backbones.filter_poses_by_rank(n=1, score_col="final_fastrelax_apo_total_score", remove_layers=1)
+        preserve_cols = ['final_relax_input_description', 'final_fastrelax_apo_total_score', 'final_postrelax_apo_catres_heavy_rmsd', 'final_postrelax_apo_catres_heavy_rmsd_mean', 'final_postrelax_apo_catres_bb_rmsd', 'final_postrelax_apo_catres_bb_rmsd_mean']
+        backbones.df = backbones.df.merge(apo_backbones.df[preserve_cols], on='final_relax_input_description')
+        
+        # calculate delta score between apo and holo poses
+        backbones.df['final_delta_apo_holo'] = backbones.df['final_fastrelax_total_score'] - backbones.df['final_fastrelax_apo_total_score']
+
+        # filter ligand rmsd
+        backbones.filter_poses_by_value(score_col="final_postrelax_ligand_rmsd_mean", value=args.eval_mean_ligand_rmsd_cutoff, operator="<=", prefix="final_mean_ligand_rmsd", plot=True)        
+        backbones.filter_poses_by_value(score_col="final_postrelax_ligand_rmsd", value=args.eval_ligand_rmsd_cutoff, operator="<=", prefix="final_ligand_rmsd", plot=True)        
+
+        # calculate final composite score
+        backbones.calculate_composite_score(
+            name=f"final_composite_score",
+            scoreterms=["final_AF2_plddt", "final_AF2_tm_TM_score_ref", "final_AF2_catres_bb_rmsd", "final_AF2_catres_heavy_rmsd", "final_delta_apo_holo", "final_postrelax_ligand_rmsd", "final_postrelax_catres_heavy_rmsd", "final_fastrelax_sap_score_mean", "final_postrelax_apo_catres_heavy_rmsd"],
+            weights=[-2, -2, 8, 4, 2, 2, 2, 1, 2],
+            plot=True
+        )
     
-    # calculate ligand clashes and ligand contacts
-    backbones = ligand_clash.run(poses=backbones, prefix="final_AF2_ligand")
-    backbones = ligand_contacts.run(poses=backbones, prefix="final_AF2_lig")
+        # plot mean results
+        plots.violinplot_multiple_cols(
+            dataframe=backbones.df,
+            cols=["final_AF2_catres_heavy_rmsd_mean", "final_AF2_catres_bb_rmsd_mean", "final_postrelax_catres_heavy_rmsd_mean", "final_postrelax_catres_bb_rmsd_mean", "final_postrelax_ligand_rmsd_mean", "final_postrelax_apo_catres_heavy_rmsd_mean", "final_fastrelax_sap_score_mean"],
+            y_labels=["Angstrom", "Angstrom", "Angstrom", "Angstrom", "Angstrom", "Angstrom", "SAP score"],
+            titles=["Mean AF2\nSidechain RMSD", "Mean AF2 catres\nBB RMSD", "Mean Relaxed\nSidechain RMSD", "Mean Relaxed catres\nBB RMSD", "Mean Relaxed ligand\nRMSD", "Mean Apo Relaxed\nSidechain RMSD", "Spatial Aggregation Propensity"],
+            out_path=os.path.join(backbones.plots_dir, "final_mean_rmsds.png"),
+            show_fig=False
+        )
 
-    # relax predictions with ligand present
-    backbones = rosetta.run(
-        poses = backbones,
-        prefix = "final_fastrelax",
-        rosetta_application="rosetta_scripts.default.linuxgccrelease",
-        nstruct = 5,
-        options = fr_options
-    )
-
-    # calculate RMSDs of relaxed poses
-    backbones = catres_motif_heavy_rmsd.run(poses = backbones, prefix = f"final_postrelax_catres_heavy")
-    backbones = catres_motif_bb_rmsd.run(poses = backbones, prefix = f"final_postrelax_catres_bb")
-    backbones = ligand_rmsd.run(poses = backbones, prefix = "final_postrelax_ligand")
-
-    # average values for all relaxed poses
-    backbones = calculate_mean_scores(poses=backbones, scores=["final_postrelax_catres_heavy_rmsd", "final_postrelax_catres_bb_rmsd", "final_postrelax_ligand_rmsd", "final_fastrelax_sap_score"], remove_layers=1)
-    
-    # filter to relaxed pose with best score
-    backbones.filter_poses_by_rank(n=1, score_col="final_fastrelax_total_score", remove_layers=1)
-
-    # relax apo poses
-    apo_backbones = rosetta.run(
-        poses = apo_backbones,
-        prefix = "final_fastrelax_apo",
-        rosetta_application="rosetta_scripts.default.linuxgccrelease",
-        nstruct = 5,
-        options = fr_options
-    )
-
-    # calculate apo relaxed rmsds
-    apo_backbones = catres_motif_heavy_rmsd.run(poses = apo_backbones, prefix = f"final_postrelax_apo_catres_heavy")
-    apo_backbones = catres_motif_bb_rmsd.run(poses = apo_backbones, prefix = f"final_postrelax_apo_catres_bb")
-    apo_backbones = calculate_mean_scores(poses=apo_backbones, scores=["final_postrelax_apo_catres_heavy_rmsd", "final_postrelax_apo_catres_bb_rmsd"], remove_layers=1)
-
-    # filter to relaxed pose with best score, merge dataframes
-    apo_backbones.filter_poses_by_rank(n=1, score_col="final_fastrelax_apo_total_score", remove_layers=1)
-    preserve_cols = ['final_relax_input_description', 'final_fastrelax_apo_total_score', 'final_postrelax_apo_catres_heavy_rmsd', 'final_postrelax_apo_catres_heavy_rmsd_mean', 'final_postrelax_apo_catres_bb_rmsd', 'final_postrelax_apo_catres_bb_rmsd_mean']
-    backbones.df = backbones.df.merge(apo_backbones.df[preserve_cols], on='final_relax_input_description')
-    
-    # calculate delta score between apo and holo poses
-    backbones.df['final_delta_apo_holo'] = backbones.df['final_fastrelax_total_score'] - backbones.df['final_fastrelax_apo_total_score']
-
-    # filter ligand rmsd
-    backbones.filter_poses_by_value(score_col="final_postrelax_ligand_rmsd_mean", value=args.eval_mean_ligand_rmsd_cutoff, operator="<=", prefix="final_mean_ligand_rmsd", plot=True)        
-    backbones.filter_poses_by_value(score_col="final_postrelax_ligand_rmsd", value=args.eval_ligand_rmsd_cutoff, operator="<=", prefix="final_ligand_rmsd", plot=True)        
-
-    # calculate final composite score
-    backbones.calculate_composite_score(
-        name=f"final_composite_score",
-        scoreterms=["final_AF2_plddt", "final_AF2_tm_TM_score_ref", "final_AF2_catres_bb_rmsd", "final_AF2_catres_heavy_rmsd", "final_delta_apo_holo", "final_postrelax_ligand_rmsd", "final_postrelax_catres_heavy_rmsd", "final_fastrelax_sap_score_mean", "final_postrelax_apo_catres_heavy_rmsd"],
-        weights=[-2, -2, 8, 6, 2, 2, 1, 1, 1],
-        plot=True
-    )
- 
-    # plot mean results
-    plots.violinplot_multiple_cols(
-        dataframe=backbones.df,
-        cols=["final_AF2_catres_heavy_rmsd_mean", "final_AF2_catres_bb_rmsd_mean", "final_postrelax_catres_heavy_rmsd_mean", "final_postrelax_catres_bb_rmsd_mean", "final_postrelax_ligand_rmsd_mean", "final_postrelax_apo_catres_heavy_rmsd_mean"],
-        y_labels=["Angstrom", "Angstrom", "Angstrom", "Angstrom", "Angstrom", "Angstrom"],
-        titles=["Mean AF2\nSidechain RMSD", "Mean AF2 catres\nBB RMSD", "Mean Relaxed\nSidechain RMSD", "Mean Relaxed catres\nBB RMSD", "Mean Relaxed ligand\nRMSD", "Mean Apo Relaxed\nSidechain RMSD"],
-        out_path=os.path.join(backbones.plots_dir, "final_mean_rmsds.png"),
-        show_fig=False
-    )
-
-    backbones.reindex_poses(prefix="final_reindex", remove_layers=2 if not args.attnpacker_repack else 3)
-    #backbones.filter_poses_by_rank(n=25, score_col='final_composite_score', prefix="final_composite_score", plot=True)
-    if not args.eval_input_json:
-        trajectory_plots = add_final_data_to_trajectory_plots(backbones.df, trajectory_plots)
-    create_final_results_dir(backbones, os.path.join(args.output_dir, f"{eval_prefix}evaluation_results"))
-    backbones.save_scores()
+        backbones.reindex_poses(prefix="final_reindex", remove_layers=2 if not args.attnpacker_repack else 3)
+        #backbones.filter_poses_by_rank(n=25, score_col='final_composite_score', prefix="final_composite_score", plot=True)
+        if not args.eval_input_json:
+            trajectory_plots = add_final_data_to_trajectory_plots(backbones.df, trajectory_plots)
+        eval_results_dir = os.path.join(args.output_dir, f"{eval_prefix}evaluation_results")
+        create_final_results_dir(backbones, eval_results_dir)
+        backbones.save_scores()
+        backbones.save_scores(out_path=os.path.join(eval_results_dir, f"results_{eval_prefix}_evaluation"))
 
 
     ########################### VARIANT GENERATION ###########################
-    if args.variants_mutations_csv:
+    if args.variants_input_json:
 
         if args.variants_prefix: variants_prefix = f"{args.variants_prefix}_"
         else: variants_prefix = eval_prefix if eval_prefix else ""
 
-        mutations = pd.read_csv(args.variants_mutations_csv)
         if args.variants_input_json:
             logging.info(f"Reading in variant generation input poses from {args.variants_input_json}!")
             backbones = protflow.poses.Poses(poses=args.variants_input_json)
@@ -1411,7 +1411,10 @@ def main(args):
         
         backbones.set_work_dir(os.path.join(args.output_dir, f"{variants_prefix}variants"))
 
-        backbones.df = backbones.df.merge(mutations, on="poses_description")
+        if args.variants_mutations_csv:
+            mutations = pd.read_csv(args.variants_mutations_csv)
+            backbones.df = mutations.merge(backbones.df, on="poses_description")
+    
         backbones.df["variants_pose_opts"] = backbones.df.apply(lambda row: omit_AAs(row['omit_AAs'], row['allow_AAs']), axis=1)
 
         backbones.df[f'variants_bbopt_opts'] = [write_bbopt_opts(row=row, cycle=1, total_cycles=1, reference_location_col="updated_reference_frags_location", cat_res_col="fixed_residues", motif_res_col="motif_residues", ligand_chain=args.ligand_chain) for _, row in backbones.df.iterrows()]
@@ -1476,9 +1479,14 @@ def main(args):
             options = fr_options
         )
 
+        apo_backbones = catres_motif_heavy_rmsd.run(poses = apo_backbones, prefix = f"variants_postrelax_apo_catres_heavy")
+        apo_backbones = catres_motif_bb_rmsd.run(poses = apo_backbones, prefix = f"variants_postrelax_apo_catres_bb")
+        apo_backbones= calculate_mean_scores(poses=apo_backbones, scores=[f"variants_postrelax_apo_catres_heavy_rmsd", f"variants_postrelax_apo_catres_bb_rmsd"],  remove_layers=1)
+
         # filter for top relaxed apo pose and merge with original dataframe
         apo_backbones.filter_poses_by_rank(n=1, score_col="variants_fastrelax_apo_total_score", remove_layers=1)
-        backbones.df = backbones.df.merge(apo_backbones.df[['variants_rlx_description', "variants_fastrelax_apo_total_score"]], on='variants_rlx_description')
+        preserve_cols = [f'variants_rlx_description', f"variants_fastrelax_apo_total_score", f"variants_postrelax_apo_catres_heavy_rmsd", f"variants_postrelax_apo_catres_heavy_rmsd_mean", f"variants_postrelax_apo_catres_bb_rmsd", f"variants_postrelax_apo_catres_bb_rmsd_mean"]
+        backbones.df = backbones.df.merge(apo_backbones.df[preserve_cols], on='variants_rlx_description')
 
         # add ligand to poses
         backbones = chain_adder.superimpose_add_chain(
@@ -1488,10 +1496,6 @@ def main(args):
             target_motif = "fixed_residues",
             copy_chain = args.ligand_chain
         )
-
-        # calculate ligand clashes and ligand contacts
-        backbones = ligand_clash.run(poses=backbones, prefix=f"variants_esm_ligand")
-        backbones = ligand_contacts.run(poses=backbones, prefix=f"variants_esm_lig")
 
         # run rosetta_script to evaluate residuewise energy
         backbones = rosetta.run(
@@ -1524,7 +1528,7 @@ def main(args):
         )
 
         # apply filters
-        backbones.filter_poses_by_value(score_col=f"cycle_{cycle}_postrelax_ligand_rmsd", value=args.ref_ligand_rmsd_end, operator="<=", prefix=f"cycle_{cycle}_ligand_rmsd", plot=True)        
+        backbones.filter_poses_by_value(score_col=f"variants_postrelax_ligand_rmsd", value=args.ref_ligand_rmsd_end, operator="<=", prefix=f"variants_ligand_rmsd", plot=True)        
 
         # define number of index layers that were added during refinement cycle (higher in subsequent cycles because reindexing adds a layer)
         layers = 3
@@ -1551,16 +1555,38 @@ def main(args):
             return_top_n_poses=5
         )
 
+        backbones.filter_poses_by_value(score_col="variants_AF2_mean_plddt", value=args.eval_mean_plddt_cutoff, operator=">=", prefix="variants_AF2_mean_plddt", plot=True)
+
+        # calculate backbone rmsds
+        backbones = catres_motif_bb_rmsd.run(poses=backbones, prefix=f"variants_AF2_catres_bb")
+        backbones = bb_rmsd.run(poses=backbones, prefix="variants_AF2_backbone", ref_col=f"cycle_{args.ref_cycles}_bbopt_location")
+        backbones = bb_rmsd.run(poses=backbones, prefix="variants_AF2_ESM_bb", ref_col=f"cycle_{args.ref_cycles}_esm_location")
+        backbones = tm_score_calculator.run(poses=backbones, prefix=f"variants_AF2_tm", ref_col=f"cycle_{args.ref_cycles}_bbopt_location")
+        backbones = tm_score_calculator.run(poses=backbones, prefix=f"variants_AF2_ESM_tm", ref_col=f"cycle_{args.ref_cycles}_esm_location")
+        backbones = calculate_mean_scores(poses=backbones, scores=["variants_AF2_catres_bb_rmsd", "variants_AF2_backbone_rmsd", "variants_AF2_tm_TM_score_ref"], remove_layers=1)
+
         if args.attnpacker_repack:
             backbones = attnpacker.run(
                 poses=backbones,
                 prefix=f"variants_AF2_packing"
             )
 
+        backbones = catres_motif_heavy_rmsd.run(poses=backbones, prefix=f"variants_AF2_catres_heavy")
+        backbones = calculate_mean_scores(poses=backbones, scores=["variants_AF2_catres_heavy_rmsd"], remove_layers=1 if not args.attnpacker_repack else 2)
+
+        # filter for AF2 top model
+        backbones.filter_poses_by_rank(n=1, score_col="variants_AF2_plddt", ascending=False, remove_layers=1 if not args.attnpacker_repack else 2)
+
+        # apply rest of the filters
+        backbones.filter_poses_by_value(score_col="variants_AF2_catres_bb_rmsd_mean", value=args.eval_mean_catres_bb_rmsd_cutoff, operator="<=", prefix=f"variants_AF2_mean_catres_bb_rmsd", plot=True)
+        backbones.filter_poses_by_value(score_col="variants_AF2_plddt", value=args.eval_plddt_cutoff, operator=">=", prefix="variants_AF2_plddt", plot=True)
+        backbones.filter_poses_by_value(score_col="variants_AF2_tm_TM_score_ref", value=0.9, operator=">=", prefix=f"variants_AF2_TM_score", plot=True)
+        backbones.filter_poses_by_value(score_col="variants_AF2_ESM_bb_rmsd", value=2.0, operator="<=", prefix="variants_AF2_ESM_bb_rmsd", plot=True) # check if AF2 and ESM predictions agree      
+        backbones.filter_poses_by_value(score_col="variants_AF2_catres_bb_rmsd", value=args.eval_catres_bb_rmsd_cutoff, operator="<=", prefix=f"variants_AF2_catres_bb_rmsd", plot=True)
+
         # copy description column for merging with apo relaxed structures
-        backbones.df['variants_af2_relax_input_description'] = backbones.df['poses_description']
+        backbones.df['variants_AF2_relax_input_description'] = backbones.df['poses_description']
         apo_backbones = copy.deepcopy(backbones)
-        apo_backbones.filter_poses_by_rank(n=1, score_col="variants_AF2_plddt", remove_layers=1 if not args.attnpacker_repack else 2)
 
         # add ligand chain 
         backbones = chain_adder.superimpose_add_chain(
@@ -1570,21 +1596,7 @@ def main(args):
             target_motif = "fixed_residues",
             copy_chain = args.ligand_chain
         )
-
-        # calculate RMSDs & TMscore
-        backbones = catres_motif_heavy_rmsd.run(poses=backbones, prefix=f"variants_AF2_catres_heavy")
-        backbones = catres_motif_bb_rmsd.run(poses=backbones, prefix=f"variants_AF2_catres_bb")
-        backbones = bb_rmsd.run(poses=backbones, prefix="variants_AF2_backbone", ref_col=f"variants_bbopt_location")
-        backbones = bb_rmsd.run(poses=backbones, prefix="variants_AF2_ESM_bb", ref_col=f"variants_esm_location")
-        backbones = tm_score_calculator.run(poses=backbones, prefix=f"variants_AF2_tm", ref_col=f"variants_bbopt_location")
-        backbones = tm_score_calculator.run(poses=backbones, prefix=f"variants_AF2_ESM_tm", ref_col=f"variants_esm_location")
-
-        # average scores for all AF2 models
-        backbones = calculate_mean_scores(poses=backbones, scores=["variants_AF2_catres_heavy_rmsd", "variants_AF2_catres_bb_rmsd", "variants_AF2_backbone_rmsd", "variants_AF2_tm_TM_score_ref"], remove_layers=1 if not args.attnpacker_repack else 2)
         
-        # filter for AF2 top model
-        backbones.filter_poses_by_rank(n=1, score_col="final_AF2_plddt", remove_layers=1 if not args.attnpacker_repack else 2)
-
         # calculate ligand clashes and ligand contacts
         backbones = ligand_clash.run(poses=backbones, prefix="variants_AF2_ligand")
         backbones = ligand_contacts.run(poses=backbones, prefix="variants_AF2_lig")
@@ -1594,7 +1606,7 @@ def main(args):
             poses = backbones,
             prefix = "variants_AF2_fastrelax",
             rosetta_application="rosetta_scripts.default.linuxgccrelease",
-            nstruct = 5,
+            nstruct = 10,
             options = fr_options
         )
 
@@ -1603,20 +1615,9 @@ def main(args):
         backbones = catres_motif_bb_rmsd.run(poses = backbones, prefix = f"variants_AF2_postrelax_catres_bb")
         backbones = ligand_rmsd.run(poses = backbones, prefix = "variants_AF2_postrelax_ligand")
 
-
         # average values for all relaxed poses
-        backbones = calculate_mean_scores(poses=backbones, scores=["variants_AF2_postrelax_catres_heavy_rmsd", "variants_AF2_postrelax_catres_bb_rmsd", "variants_AF2_postrelax_ligand_rmsd"], remove_layers=1)
+        backbones = calculate_mean_scores(poses=backbones, scores=["variants_AF2_postrelax_catres_heavy_rmsd", "variants_AF2_postrelax_catres_bb_rmsd", "variants_AF2_postrelax_ligand_rmsd", "variants_AF2_fastrelax_sap_score"], remove_layers=1)
         
-        # plot mean results
-        plots.violinplot_multiple_cols(
-            dataframe=backbones.df,
-            cols=["variants_AF2_catres_heavy_rmsd", "variants_AF2_catres_bb_rmsd_mean", "variants_AF2_postrelax_catres_heavy_rmsd_mean", "variants_AF2_postrelax_catres_bb_rmsd_mean", "variants_AF2_postrelax_ligand_rmsd_mean"],
-            y_labels=["Angstrom", "Angstrom", "Angstrom", "Angstrom", "Angstrom", "Angstrom"],
-            titles=["Mean AF2\nSidechain RMSD", "Mean AF2 catres\nBB RMSD", "Mean Relaxed\nSidechain RMSD", "Mean Relaxed catres\nBB RMSD", "Mean Relaxed ligand\nRMSD"],
-            out_path=os.path.join(backbones.plots_dir, "variants_mean_rmsds.png"),
-            show_fig=False
-        )
-
         # filter to relaxed pose with best score
         backbones.filter_poses_by_rank(n=1, score_col="variants_AF2_fastrelax_total_score", remove_layers=1)
 
@@ -1625,36 +1626,48 @@ def main(args):
             poses = apo_backbones,
             prefix = "variants_AF2_fastrelax_apo",
             rosetta_application="rosetta_scripts.default.linuxgccrelease",
-            nstruct = 5,
+            nstruct = 10,
             options = fr_options
         )
 
+        # calculate apo relaxed rmsds
+        apo_backbones = catres_motif_heavy_rmsd.run(poses = apo_backbones, prefix = f"variants_AF2_postrelax_apo_catres_heavy")
+        apo_backbones = catres_motif_bb_rmsd.run(poses = apo_backbones, prefix = f"variants_AF2_postrelax_apo_catres_bb")
+        apo_backbones = calculate_mean_scores(poses=apo_backbones, scores=["variants_AF2_postrelax_apo_catres_heavy_rmsd", "variants_AF2_postrelax_apo_catres_bb_rmsd"], remove_layers=1)
+
         # filter to relaxed pose with best score, merge dataframes
         apo_backbones.filter_poses_by_rank(n=1, score_col="variants_AF2_fastrelax_apo_total_score", remove_layers=1)
-        backbones.df = backbones.df.merge(apo_backbones.df[['variants_af2_relax_input_description', 'variants_AF2_fastrelax_apo_total_score']], on='variants_af2_relax_input_description')
+        preserve_cols = ['variants_AF2_relax_input_description', 'variants_AF2_fastrelax_apo_total_score', 'variants_AF2_postrelax_apo_catres_heavy_rmsd', 'variants_AF2_postrelax_apo_catres_heavy_rmsd_mean', 'variants_AF2_postrelax_apo_catres_bb_rmsd', 'variants_AF2_postrelax_apo_catres_bb_rmsd_mean']
+        backbones.df = backbones.df.merge(apo_backbones.df[preserve_cols], on='variants_AF2_relax_input_description')
         
         # calculate delta score between apo and holo poses
         backbones.df['variants_AF2_delta_apo_holo'] = backbones.df['variants_AF2_fastrelax_total_score'] - backbones.df['variants_AF2_fastrelax_apo_total_score']
 
-        # calculate final composite score
+        # filter ligand rmsd
+        backbones.filter_poses_by_value(score_col="variants_AF2_postrelax_ligand_rmsd_mean", value=args.eval_mean_ligand_rmsd_cutoff, operator="<=", prefix="variants_AF2_mean_ligand_rmsd", plot=True)        
+        backbones.filter_poses_by_value(score_col="variants_AF2_postrelax_ligand_rmsd", value=args.eval_ligand_rmsd_cutoff, operator="<=", prefix="variants_AF2_ligand_rmsd", plot=True)        
+
+        # calculate variants_AF2 composite score
         backbones.calculate_composite_score(
-            name=f"variants_final_composite_score",
-            scoreterms=["variants_AF2_plddt", "variants_AF2_tm_TM_score_ref", "variants_AF2_catres_bb_rmsd", "variants_AF2_catres_heavy_rmsd", "variants_AF2_delta_apo_holo", "variants_AF2_postrelax_ligand_rmsd", "variants_AF2_postrelax_catres_heavy_rmsd"],
-            weights=[-1, -1, 4, 4, 1, 1, 1],
+            name=f"variants_AF2_composite_score",
+            scoreterms=["variants_AF2_plddt", "variants_AF2_tm_TM_score_ref", "variants_AF2_catres_bb_rmsd", "variants_AF2_catres_heavy_rmsd", "variants_AF2_delta_apo_holo", "variants_AF2_postrelax_ligand_rmsd", "variants_AF2_postrelax_catres_heavy_rmsd", "variants_AF2_fastrelax_sap_score_mean", "variants_AF2_postrelax_apo_catres_heavy_rmsd"],
+            weights=[-2, -2, 8, 4, 2, 2, 2, 1, 2],
             plot=True
         )
+    
+        # plot mean results
+        plots.violinplot_multiple_cols(
+            dataframe=backbones.df,
+            cols=["variants_AF2_catres_heavy_rmsd_mean", "variants_AF2_catres_bb_rmsd_mean", "variants_AF2_postrelax_catres_heavy_rmsd_mean", "variants_AF2_postrelax_catres_bb_rmsd_mean", "variants_AF2_postrelax_ligand_rmsd_mean", "variants_AF2_postrelax_apo_catres_heavy_rmsd_mean", "variants_AF2_fastrelax_sap_score_mean"],
+            y_labels=["Angstrom", "Angstrom", "Angstrom", "Angstrom", "Angstrom", "Angstrom", "SAP score"],
+            titles=["Mean AF2\nSidechain RMSD", "Mean AF2 catres\nBB RMSD", "Mean Relaxed\nSidechain RMSD", "Mean Relaxed catres\nBB RMSD", "Mean Relaxed ligand\nRMSD", "Mean Apo Relaxed\nSidechain RMSD", "Spatial Aggregation Propensity"],
+            out_path=os.path.join(backbones.plots_dir, "variants_AF2_mean_rmsds.png"),
+            show_fig=False
+        )
 
-        # apply filters only after calculating composite scores!
-        backbones.filter_poses_by_value(score_col="variants_AF2_mean_plddt", value=args.eval_mean_plddt_cutoff, operator=">=", prefix="variants_AF2_plddt", plot=True)
-        backbones.filter_poses_by_value(score_col="variants_AF2_tm_TM_score_ref", value=0.9, operator=">=", prefix=f"variants_AF2_TM_score", plot=True)
-        backbones.filter_poses_by_value(score_col="variants_AF2_catres_bb_rmsd_mean", value=args.eval_mean_catres_bb_rmsd_cutoff, operator="<=", prefix=f"variants_AF2_catres_bb_rmsd", plot=True)
-        backbones.filter_poses_by_value(score_col="variants_AF2_postrelax_ligand_rmsd_mean", value=args.eval_mean_ligand_rmsd_cutoff, operator="<=", prefix="variants_ligand_rmsd", plot=True)        
-        backbones.filter_poses_by_value(score_col="variants_AF2_ESM_bb_rmsd", value=2.0, operator="<=", prefix="variants_AF2_ESM_bb_rmsd", plot=True) # check if AF2 and ESM predictions agree      
-
-        backbones.reindex_poses(prefix="variants_final_reindex", remove_layers=2 if not args.attnpacker_repack else 3)
+        backbones.reindex_poses(prefix="variants_AF2_reindex", remove_layers=2 if not args.attnpacker_repack else 3)
         #backbones.filter_poses_by_rank(n=25, score_col='final_composite_score', prefix="final_composite_score", plot=True)
-        #if not args.eval_input_json:
-        #    trajectory_plots = add_final_data_to_trajectory_plots(backbones.df, trajectory_plots)
+
         create_final_results_dir(backbones, os.path.join(args.output_dir, f"{variants_prefix}variants_results"))
         backbones.save_scores()
 
@@ -1689,7 +1702,7 @@ if __name__ == "__main__":
     argparser.add_argument("--ref_catres_bb_rmsd_cutoff_start", type=float, default=1.2, help="Start value for catres backbone rmsd filter after each refinement cycle. Filter will be ramped from start to end during refinement.")
     argparser.add_argument("--ref_plddt_cutoff_end", type=float, default=85, help="End value for esm plddt filter after each refinement cycle. Filter will be ramped from start to end during refinement.")
     argparser.add_argument("--ref_plddt_cutoff_start", type=float, default=80, help="Start value for esm plddt filter after each refinement cycle. Filter will be ramped from start to end during refinement.")
-    argparser.add_argument("--ref_ligand_rmsd_end", type=float, default=1.8, help="End value for esm plddt filter after each refinement cycle. Filter will be ramped from start to end during refinement.")
+    argparser.add_argument("--ref_ligand_rmsd_end", type=float, default=2.0, help="End value for esm plddt filter after each refinement cycle. Filter will be ramped from start to end during refinement.")
     argparser.add_argument("--ref_ligand_rmsd_start", type=float, default=2.8, help="Start value for esm plddt filter after each refinement cycle. Filter will be ramped from start to end during refinement.")
     argparser.add_argument("--ref_num_cycle_poses", type=int, default=3, help="Number of poses per unique diffusion backbone that should be passed on to the next refinement cycle.")
     argparser.add_argument("--ref_seq_thread_num_mpnn_seqs", type=float, default=3, help="Number of LigandMPNN output sequences during the initial, sequence-threading phase (pre-relax).")
@@ -1711,13 +1724,13 @@ if __name__ == "__main__":
     # evaluation
     argparser.add_argument("--eval_prefix", type=str, default=None, help="Prefix for evaluation runs for testing different settings or refinement outputs.")
     argparser.add_argument("--eval_input_json", type=str, default=None, help="Read in a custom poses json containing input poses for evaluation.")
-    argparser.add_argument("--eval_input_poses", type=int, default=None, help="Maximum number of input poses for evaluation with AF2 after refinement. Poses will be filtered by design_composite_score.")
-    argparser.add_argument("--eval_input_poses_per_bb", type=int, default=5, help="Maximum number of input poses per unique diffusion backbone for evaluation with AF2 after refinement. Poses will be filtered by design_composite_score")
+    argparser.add_argument("--eval_input_poses", type=int, default=100, help="Maximum number of input poses for evaluation with AF2 after refinement. Poses will be filtered by design_composite_score.")
+    argparser.add_argument("--eval_input_poses_per_bb", type=int, default=10, help="Maximum number of input poses per unique diffusion backbone for evaluation with AF2 after refinement. Poses will be filtered by design_composite_score")
     argparser.add_argument("--eval_mean_plddt_cutoff", type=float, default=80, help="Cutoff for mean plddt over all AF2 models of each pose.")
     argparser.add_argument("--eval_mean_catres_bb_rmsd_cutoff", type=float, default=1.0, help="Cutoff for mean catres backbone rmsd over all AF2 models of each pose.")
     argparser.add_argument("--eval_mean_ligand_rmsd_cutoff", type=int, default=2.5, help="Cutoff for mean ligand rmsd over all relaxed models of the top AF2 model for each pose.")
     argparser.add_argument("--eval_plddt_cutoff", type=float, default=85, help="Cutoff for plddt for the AF2 top model for each pose.")
-    argparser.add_argument("--eval_catres_bb_rmsd_cutoff", type=float, default=0.6, help="Cutoff for catres backbone rmsd for the AF2 top model for each pose.")
+    argparser.add_argument("--eval_catres_bb_rmsd_cutoff", type=float, default=0.7, help="Cutoff for catres backbone rmsd for the AF2 top model for each pose.")
     argparser.add_argument("--eval_ligand_rmsd_cutoff", type=int, default=2, help="Cutoff for ligand rmsd for the top relaxed model of the top AF2 model for each pose.")
 
     # variant generation
