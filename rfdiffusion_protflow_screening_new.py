@@ -1239,6 +1239,10 @@ def main(args):
             logging.warning(f"Using data from refinement cycle {args.ref_cycles}. Make sure this is the correct one when reading in evaluation input poses from file!")
             for res_col in residue_cols:
                 backbones.df[res_col] = [protflow.residues.ResidueSelection(motif, from_scorefile=True) for motif in backbones.df[res_col].to_list()]
+        
+        if args.eval_drop_previous_results:
+            eval_cols = [col for col in backbones.df.columns if col.startswith("final")]
+            backbones.df.drop(eval_cols, axis=1, inplace=True)
 
         backbones.set_work_dir(os.path.join(args.output_dir, f"{eval_prefix}evaluation"))
 
@@ -1401,7 +1405,7 @@ def main(args):
     if args.variants_input_json:
 
         if args.variants_prefix: variants_prefix = f"{args.variants_prefix}_"
-        else: variants_prefix = eval_prefix if eval_prefix else ""
+        else: variants_prefix = eval_prefix if args.eval_prefix or args.ref_prefix else ""
 
         if args.variants_input_json:
             logging.info(f"Reading in variant generation input poses from {args.variants_input_json}!")
@@ -1414,8 +1418,7 @@ def main(args):
         if args.variants_mutations_csv:
             mutations = pd.read_csv(args.variants_mutations_csv)
             backbones.df = mutations.merge(backbones.df, on="poses_description")
-    
-        backbones.df["variants_pose_opts"] = backbones.df.apply(lambda row: omit_AAs(row['omit_AAs'], row['allow_AAs']), axis=1)
+            backbones.df["variants_pose_opts"] = backbones.df.apply(lambda row: omit_AAs(row['omit_AAs'], row['allow_AAs']), axis=1)
 
         backbones.df[f'variants_bbopt_opts'] = [write_bbopt_opts(row=row, cycle=1, total_cycles=1, reference_location_col="updated_reference_frags_location", cat_res_col="fixed_residues", motif_res_col="motif_residues", ligand_chain=args.ligand_chain) for _, row in backbones.df.iterrows()]
 
@@ -1438,8 +1441,8 @@ def main(args):
             nseq = 25,
             model_type = "ligand_mpnn",
             options = ligandmpnn_options,
-            pose_options = "variants_pose_opts",
-            fixed_res_col = "fixed_residues",
+            pose_options = "variants_pose_opts" if args.variants_mutations_csv else None,
+            fixed_res_col = "fixed_residues"
         )
 
         # predict structures using ESMFold
@@ -1732,6 +1735,7 @@ if __name__ == "__main__":
     argparser.add_argument("--eval_plddt_cutoff", type=float, default=85, help="Cutoff for plddt for the AF2 top model for each pose.")
     argparser.add_argument("--eval_catres_bb_rmsd_cutoff", type=float, default=0.7, help="Cutoff for catres backbone rmsd for the AF2 top model for each pose.")
     argparser.add_argument("--eval_ligand_rmsd_cutoff", type=int, default=2, help="Cutoff for ligand rmsd for the top relaxed model of the top AF2 model for each pose.")
+    argparser.add_argument("--eval_drop_previous_results", action="store_true", help="Drop all evaluation columns from poses dataframe (useful if running evaluation again, e.g. after refining first evaluation output)")
 
     # variant generation
     argparser.add_argument("--variants_prefix", type=str, default=None, help="Prefix for variant generation runs for testing different variants.")
