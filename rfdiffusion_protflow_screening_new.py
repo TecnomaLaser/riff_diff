@@ -292,6 +292,70 @@ def create_final_results_dir(poses, dir:str):
         target_motif_col = "fixed_residues"
     )
 
+def create_variants_results_dir(poses, dir:str):
+    # plot outputs and write alignment script
+
+    os.makedirs(dir, exist_ok=True)
+
+    logging.info(f"Plotting final outputs.")
+    cols = ["variants_AF2_plddt", "variants_AF2_mean_plddt", "variants_AF2_backbone_rmsd", "variants_AF2_catres_heavy_rmsd", "variants_AF2_fastrelax_total_score", "variants_AF2_postrelax_catres_heavy_rmsd", "variants_AF2_postrelax_catres_bb_rmsd", "variants_AF2_delta_apo_holo", "variants_AF2_catres_heavy_rmsd_mean", "variants_AF2_postrelax_catres_heavy_rmsd_mean", "variants_AF2_postrelax_ligand_rmsd", "variants_AF2_postrelax_ligand_rmsd_mean", "variants_AF2_fastrelax_sap_score_mean"]
+    titles = ["AF2 pLDDT", "mean AF2 pLDDT", "AF2 BB-Ca RMSD", "AF2 Sidechain\nRMSD", "Rosetta total_score", "Relaxed Sidechain\nRMSD", "Relaxed BB-Ca RMSD", "Delta Apo Holo", "Mean AF2 Sidechain\nRMSD", "Mean Relaxed Sidechain\nRMSD", "Postrelax Ligand\nRMSD", "Mean Postrelax Ligand\nRMSD", "Spatial Aggregation\nPropensity"]
+    y_labels = ["pLDDT", "pLDDT", "Angstrom", "Angstrom", "[REU]", "Angstrom", "Angstrom", "[REU]", "Angstrom", "Angstrom", "Angstrom", "Angstrom", "SAP score"]
+    dims = [(0,100), (0,100), (0,5), (0,5), None, (0,5), (0,5), None, (0,5), (0,5), (0,5), (0,5), None]
+
+    # plot results
+    plots.violinplot_multiple_cols(
+        dataframe = poses.df,
+        cols = cols,
+        titles = titles,
+        y_labels = y_labels,
+        dims = dims,
+        out_path = os.path.join(dir, f"variants_results.png"),
+        show_fig = False
+    )
+
+    '''
+    trajectory_scores = ["plddt", "catres_heavy_rmsd", "catres_bb_rmsd"]
+    prefixes = ["final_AF"] + [f"cycle_{i}" for i in range(1, cycle+1)]
+
+    for score in trajectory_scores:
+        plots.violinplot_multiple_cols(
+            dataframe=poses.df,
+            cols=[f"{prefix}_{score}" for prefix in prefixes],
+            y_labels=["Angstrom", "Angstrom", "Angstrom", "Angstrom", "Angstrom"],
+            titles=["Mean AF2\nSidechain RMSD", "Mean AF2 catres\nBB RMSD", "Mean Relaxed\nSidechain RMSD", "Mean Relaxed catres\nBB RMSD", "Mean Postrelax\nLigand RMSD"],
+            out_path=os.path.join(dir, "evaluation_mean_rmsds.png"),
+            show_fig=False
+        )
+    '''
+
+    plots.violinplot_multiple_cols(
+        dataframe=poses.df,
+        cols=["variants_AF2_catres_heavy_rmsd_mean", "variants_AF2_catres_bb_rmsd_mean", "variants_AF2_postrelax_catres_heavy_rmsd_mean", "variants_AF2_postrelax_catres_bb_rmsd_mean", "variants_AF2_postrelax_ligand_rmsd_mean"],
+        y_labels=["Angstrom", "Angstrom", "Angstrom", "Angstrom", "Angstrom"],
+        titles=["Mean AF2\nSidechain RMSD", "Mean AF2 catres\nBB RMSD", "Mean Relaxed\nSidechain RMSD", "Mean Relaxed catres\nBB RMSD", "Mean Postrelax\nLigand RMSD"],
+        out_path=os.path.join(dir, "variants_mean_rmsds.png"),
+        show_fig=False
+    )
+
+    poses.save_poses(out_path=dir)
+    poses.save_poses(out_path=dir, poses_col="input_poses")
+    poses.save_scores(out_path=dir)
+
+    # write pymol alignment script?
+    logging.info(f"Writing pymol alignment script for backbones after evaluation at {dir}.")
+    write_pymol_alignment_script(
+        df = poses.df,
+        scoreterm = "variants_AF2_composite_score",
+        top_n = np.min([25, len(poses.df.index)]),
+        path_to_script = os.path.join(dir, "align_results.pml"),
+        ref_motif_col = "template_fixedres",
+        ref_catres_col = "template_fixedres",
+        target_catres_col = "fixed_residues",
+        target_motif_col = "fixed_residues"
+    )
+
+
 def write_bbopt_opts(row: pd.Series, cycle: int, total_cycles: int, reference_location_col:str, motif_res_col: str, cat_res_col: str, ligand_chain: str) -> str:
     return f"-in:file:native {row[reference_location_col]} -parser:script_vars motif_res={row[motif_res_col].to_string(ordering='rosetta')} cat_res={row[cat_res_col].to_string(ordering='rosetta')} substrate_chain={ligand_chain} sd={0.8 - (0.4 * cycle/total_cycles)}"
 
@@ -340,7 +404,7 @@ def combine_screening_results(dir: str, prefixes: list, scores: list, weights: l
     # combine all screening outputs into new poses
     pose_df = []
     for prefix in prefixes:
-        df = pd.read_json(os.path.join(dir, prefix, f"{prefix}_scores.json"))
+        df = pd.read_json(os.path.join(dir, "screening", prefix, f"{prefix}_scores.json"))
         df['screen_passed_poses'] = len(df.index)
         pose_df.append(df)
     pose_df = pd.concat(pose_df).reset_index(drop=True)
@@ -1517,7 +1581,7 @@ def main(args):
         backbones = catres_motif_heavy_rmsd.run(poses = backbones, prefix = "variants_postrelax_catres_heavy")
         backbones = catres_motif_bb_rmsd.run(poses = backbones, prefix = "variants_postrelax_catres_bb")
         backbones = ligand_rmsd.run(poses = backbones, prefix = "variants_postrelax_ligand")
-        backbones = calculate_mean_scores(poses=backbones, scores=["variants_postrelax_catres_heavy_rmsd", "variants_postrelax_catres_bb_rmsd", "variants_postrelax_ligand_rmsd"], remove_layers=1)
+        backbones = calculate_mean_scores(poses=backbones, scores=["variants_postrelax_catres_heavy_rmsd", "variants_postrelax_catres_bb_rmsd", "variants_postrelax_ligand_rmsd", "variants_fastrelax_sap_score"], remove_layers=1)
 
         # filter backbones down to relax input backbones
         backbones.filter_poses_by_rank(n=1, score_col="variants_fastrelax_total_score", remove_layers=1)
@@ -1525,11 +1589,11 @@ def main(args):
         # calculate multi-scoreterm score for the final backbone filter:
         backbones.calculate_composite_score(
             name="variants_composite_score",
-            scoreterms=["variants_esm_plddt", "variants_esm_tm_TM_score_ref", "variants_esm_catres_bb_rmsd", "variants_esm_catres_heavy_rmsd", "variants_delta_apo_holo", "variants_postrelax_ligand_rmsd", "variants_postrelax_catres_heavy_rmsd"],
-            weights=[-1, -1, 4, 4, 1, 1, 1],
+            scoreterms=["variants_esm_plddt", "variants_esm_tm_TM_score_ref", "variants_esm_catres_bb_rmsd", "variants_esm_catres_heavy_rmsd", "variants_delta_apo_holo", "variants_postrelax_ligand_rmsd", "variants_postrelax_catres_heavy_rmsd", "variants_fastrelax_sap_score_mean", "variants_postrelax_apo_catres_heavy_rmsd"],
+            weights=[-2, -2, 8, 4, 2, 2, 2, 1, 2],
             plot=True
         )
-
+        
         # apply filters
         backbones.filter_poses_by_value(score_col=f"variants_postrelax_ligand_rmsd", value=args.ref_ligand_rmsd_end, operator="<=", prefix=f"variants_ligand_rmsd", plot=True)        
 
@@ -1542,11 +1606,19 @@ def main(args):
 
         # filter down to rfdiffusion backbones
         backbones.filter_poses_by_rank(
-            n=args.variants_num_output_poses,
+            n=args.variants_evaluation_input_poses_per_bb,
+            score_col="variants_composite_score",
+            prefix="variants_composite_score_per_bb",
+            plot=True,
+            remove_layers=1
+        )
+
+        backbones.filter_poses_by_rank(
+            n=args.variants_evaluation_input_poses,
             score_col="variants_composite_score",
             prefix="variants_composite_score",
             plot=True,
-            remove_layers=1
+            remove_layers=None
         )
 
         backbones.convert_pdb_to_fasta(prefix="variants_fasta_conversion", update_poses=True)
@@ -1671,7 +1743,7 @@ def main(args):
         backbones.reindex_poses(prefix="variants_AF2_reindex", remove_layers=2 if not args.attnpacker_repack else 3)
         #backbones.filter_poses_by_rank(n=25, score_col='final_composite_score', prefix="final_composite_score", plot=True)
 
-        create_final_results_dir(backbones, os.path.join(args.output_dir, f"{variants_prefix}variants_results"))
+        create_variants_results_dir(backbones, os.path.join(args.output_dir, f"{variants_prefix}variants_results"))
         backbones.save_scores()
 
 
@@ -1742,6 +1814,8 @@ if __name__ == "__main__":
     argparser.add_argument("--variants_input_json", type=str, default=None, help="Read in a custom json containing poses from evaluation output.")
     argparser.add_argument("--variants_mutations_csv", type=str, default=None, help="Read in a custom csv containing poses description and mutation columns.")
     argparser.add_argument("--variants_num_poses_per_bb", type=int, default=5, help="Read in a custom csv containing poses description and mutation columns.")
+    argparser.add_argument("--variants_evaluation_input_poses_per_bb", type=int, default=15, help="Number of poses per unique backbone that should go into the evaluation step of variant generation.")
+    argparser.add_argument("--variants_evaluation_input_poses", type=int, default=100, help="Number of poses per unique backbone that should go into the evaluation step of variant generation.")
 
     # rfdiffusion optionals
     argparser.add_argument("--as_model_path", type=str, default="/home/mabr3112/RFdiffusion/models/ActiveSite_ckpt.pt")
