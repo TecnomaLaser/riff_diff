@@ -1027,7 +1027,9 @@ def main(args):
             backbones.save_scores()
 
             # write successfull motifs to file, so that they can be read in again
-            successfull_motifs = starting_motifs.df.merge(backbones.df['input_poses'], on="input_poses", )
+            backbones.df.drop_duplicates(subset=["input_poses"], keep="first")
+            successfull_motifs = starting_motifs.df.merge(backbones.df['input_poses'], on="input_poses")
+            successfull_motifs.to_json(os.path.join())
             pd.DataFrame().merge()
             starting_motifs
 
@@ -1642,10 +1644,10 @@ def main(args):
 
         # calculate backbone rmsds
         backbones = catres_motif_bb_rmsd.run(poses=backbones, prefix=f"variants_AF2_catres_bb")
-        backbones = bb_rmsd.run(poses=backbones, prefix="variants_AF2_backbone", ref_col=f"cycle_{args.ref_cycles}_bbopt_location")
-        backbones = bb_rmsd.run(poses=backbones, prefix="variants_AF2_ESM_bb", ref_col=f"cycle_{args.ref_cycles}_esm_location")
-        backbones = tm_score_calculator.run(poses=backbones, prefix=f"variants_AF2_tm", ref_col=f"cycle_{args.ref_cycles}_bbopt_location")
-        backbones = tm_score_calculator.run(poses=backbones, prefix=f"variants_AF2_ESM_tm", ref_col=f"cycle_{args.ref_cycles}_esm_location")
+        backbones = bb_rmsd.run(poses=backbones, prefix="variants_AF2_backbone", ref_col=f"variants_bbopt_location")
+        backbones = bb_rmsd.run(poses=backbones, prefix="variants_AF2_ESM_bb", ref_col=f"variants_esm_location")
+        backbones = tm_score_calculator.run(poses=backbones, prefix=f"variants_AF2_tm", ref_col=f"variants_bbopt_location")
+        backbones = tm_score_calculator.run(poses=backbones, prefix=f"variants_AF2_ESM_tm", ref_col=f"cvariants_esm_location")
         backbones = calculate_mean_scores(poses=backbones, scores=["variants_AF2_catres_bb_rmsd", "variants_AF2_backbone_rmsd", "variants_AF2_tm_TM_score_ref"], remove_layers=1)
 
         if args.attnpacker_repack:
