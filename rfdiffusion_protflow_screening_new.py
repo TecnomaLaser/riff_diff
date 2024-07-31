@@ -340,6 +340,9 @@ def create_variants_results_dir(poses, dir:str):
 
     poses.save_poses(out_path=dir)
     poses.save_poses(out_path=dir, poses_col="input_poses")
+
+    poses.df.sort_values("variants_AF2_composite_score", inplace=True)
+    poses.df.reset_index(drop=True, inplace=True)
     poses.save_scores(out_path=os.path.join(dir, "results_variants.json"))
 
     # write pymol alignment script?
@@ -1659,7 +1662,7 @@ def main(args):
         backbones = bb_rmsd.run(poses=backbones, prefix="variants_AF2_backbone", ref_col=f"variants_bbopt_location")
         backbones = bb_rmsd.run(poses=backbones, prefix="variants_AF2_ESM_bb", ref_col=f"variants_esm_location")
         backbones = tm_score_calculator.run(poses=backbones, prefix=f"variants_AF2_tm", ref_col=f"variants_bbopt_location")
-        backbones = tm_score_calculator.run(poses=backbones, prefix=f"variants_AF2_ESM_tm", ref_col=f"cvariants_esm_location")
+        backbones = tm_score_calculator.run(poses=backbones, prefix=f"variants_AF2_ESM_tm", ref_col=f"variants_esm_location")
         backbones = calculate_mean_scores(poses=backbones, scores=["variants_AF2_catres_bb_rmsd", "variants_AF2_backbone_rmsd", "variants_AF2_tm_TM_score_ref"], remove_layers=1)
 
         if args.attnpacker_repack:
