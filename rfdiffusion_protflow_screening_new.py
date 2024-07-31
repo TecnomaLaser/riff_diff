@@ -393,7 +393,7 @@ def calculate_mean_scores(poses: protflow.poses.Poses, scores: list, remove_laye
         poses.calculate_mean_score(name=f"{score}_mean", score_col=score, remove_layers=remove_layers)
     return poses
 
-def combine_screening_results(dir: str, prefixes: list, scores: list, weights: list, residue_cols: list, model: str):
+def combine_screening_results(dir: str, prefixes: list, scores: list, weights: list, residue_cols: list, model: str, input_motifs: protflow.poses.Poses):
     if len(prefixes) == 0:
         logging.error("No poses passed in any of the screening runs. Aborting!"); sys.exit(1)
     
@@ -444,6 +444,9 @@ def combine_screening_results(dir: str, prefixes: list, scores: list, weights: l
     poses.df.reset_index(drop=True, inplace=True)
     poses.save_scores(out_path=os.path.join(out_dir, 'screening_results_all.json'))
 
+
+    
+
     logging.info(f"Writing pymol alignment script for screening results at {out_dir}")
     write_pymol_alignment_script(
         df=poses.df,
@@ -458,6 +461,13 @@ def combine_screening_results(dir: str, prefixes: list, scores: list, weights: l
 
     poses.save_poses(out_path=out_dir)
     poses.save_poses(out_path=out_dir, poses_col="input_poses")
+
+    # save successful input motifs
+    unique = poses.df.drop_duplicates(subset=["input_poses"], keep="first")
+    successfull_motifs = input_motifs.df.merge(unique['input_poses'], on="input_poses")
+    successfull_motifs.reset_index(drop=True, inplace=True)
+    successfull_motifs.to_json(os.path.join(out_dir, "successful_input_motifs.json"))
+
     return poses
     
 def ramp_cutoff(start_value, end_value, cycle, total_cycles):
@@ -608,7 +618,10 @@ def main(args):
         os.makedirs(screening_dir, exist_ok=True)
         # load poses
         input_poses_path = os.path.join(screening_dir, 'screening_input_poses', 'screening_input_poses.json')
-        if os.path.isfile(input_poses_path):
+        if args.screen_input_json:
+            backbones = protflow.poses.Poses(poses=args.screen_input_json)
+            backbones.set_work_dir(screening_dir)
+        elif os.path.isfile(input_poses_path):
             backbones = protflow.poses.Poses(poses=input_poses_path)
             backbones.set_work_dir(screening_dir)
         else:
@@ -1027,15 +1040,14 @@ def main(args):
             backbones.save_scores()
 
             # write successfull motifs to file, so that they can be read in again
-            backbones.df.drop_duplicates(subset=["input_poses"], keep="first")
+            backbones.df.drop_duplicates(subset=["input_poses"], keep="first", inplace=True)
             successfull_motifs = starting_motifs.df.merge(backbones.df['input_poses'], on="input_poses")
-            successfull_motifs.to_json(os.path.join())
-            pd.DataFrame().merge()
-            starting_motifs
+            successfull_motifs.reset_index(drop=True, inplace=True)
+            successfull_motifs.to_json(os.path.join(results_dir, "successful_input_motifs.json"))
 
         scores = ["esm_plddt", "esm_tm_TM_score_ref", "esm_catres_bb_rmsd", "esm_catres_heavy_rmsd", "esm_rog", "esm_lig_contacts", "esm_ligand_clashes", "screen_passed_poses"]
         weights = [-1, -1, 4, 3, 1, -1, -1, 1]
-        backbones = combine_screening_results(dir=args.output_dir, prefixes=prefixes, scores=scores, weights=weights, residue_cols=residue_cols, model=args.model)
+        backbones = combine_screening_results(dir=args.output_dir, prefixes=prefixes, scores=scores, weights=weights, residue_cols=residue_cols, model=args.model, input_motifs=starting_motifs)
         backbones.set_work_dir(args.output_dir)
         backbones.save_scores()
 
@@ -1805,6 +1817,7 @@ if __name__ == "__main__":
     argparser.add_argument("--screen_rog_weight", type=str, default="2,3,4", help="Weights for ROG potential that should be tested during screening. Separated by ;. Only used if <model> is 'active_site'.")
     argparser.add_argument("--screen_num_mpnn_sequences", type=int, default=20, help="Number of LigandMPNN sequences that should be predicted with ESMFold post-RFdiffusion.")
     argparser.add_argument("--screen_num_seq_thread_sequences", type=int, default=3, help="Number of LigandMPNN sequences that should be generated during the sequence threading phase (input for backbone optimization). Only used if <screen_mpnn_rlx_mpnn> is True.")
+    argparser.add_argument("--screen_input_json", type=str, default=None, help="Read in a poses json file containing input poses for screening (e.g. the successful_input_motifs.json from a previous screening run).")
 
     # evaluation
     argparser.add_argument("--eval_prefix", type=str, default=None, help="Prefix for evaluation runs for testing different settings or refinement outputs.")
