@@ -340,7 +340,7 @@ def create_variants_results_dir(poses, dir:str):
 
     poses.save_poses(out_path=dir)
     poses.save_poses(out_path=dir, poses_col="input_poses")
-    poses.save_scores(out_path=dir)
+    poses.save_scores(out_path=os.path.join(dir, "results_variants.json"))
 
     # write pymol alignment script?
     logging.info(f"Writing pymol alignment script for backbones after evaluation at {dir}.")
@@ -629,6 +629,9 @@ def main(args):
             backbones.save_poses(os.path.join(screening_dir, 'screening_input_poses'))
             backbones.save_scores(input_poses_path)
         
+        # save input backbones for later
+        starting_motifs = copy.deepcopy(backbones)
+
         # change flanker lengths of rfdiffusion motif contigs
         if args.flanking:
             backbones.df["rfdiffusion_pose_opts"] = [adjust_flanking(rfdiffusion_pose_opts_str, "split", args.flanker_length) for rfdiffusion_pose_opts_str in backbones.df["rfdiffusion_pose_opts"].to_list()]
@@ -984,7 +987,8 @@ def main(args):
             # calculate fraction of (design-successful) backbones where pocket was identified using fpocket.
             #pocket_containing_fraction = backbones.df["postrelax_top_volume"].count() / len(backbones)
             #logging.info(f"Fraction of RFdiffusion design-successful backbones that contain active-site pocket: {pocket_containing_fraction}")
-
+            backbones.df.sort_values("design_composite_score", ascending=True, inplace=True)
+            backbones.df.reset_index(drop=True, inplace=True)
             backbones.reindex_poses(prefix="reindex", remove_layers=5 if args.screen_mpnn_rlx_mpnn else 3, force_reindex=True)
 
             # copy filtered poses to new location
@@ -1022,6 +1026,10 @@ def main(args):
 
             backbones.save_scores()
 
+            # write successfull motifs to file, so that they can be read in again
+            successfull_motifs = starting_motifs.df.merge(backbones.df['input_poses'], on="input_poses", )
+            pd.DataFrame().merge()
+            starting_motifs
 
         scores = ["esm_plddt", "esm_tm_TM_score_ref", "esm_catres_bb_rmsd", "esm_catres_heavy_rmsd", "esm_rog", "esm_lig_contacts", "esm_ligand_clashes", "screen_passed_poses"]
         weights = [-1, -1, 4, 3, 1, -1, -1, 1]
