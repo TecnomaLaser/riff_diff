@@ -1129,6 +1129,24 @@ def main(args):
             backbones.set_work_dir(cycle_work_dir)
             logging.info(f"Starting refinement cycle {cycle} in directory {cycle_work_dir}")
 
+            # remove ligand and add it back to make sure theozyme orientation is used and not the relaxed output from the previous cycle!
+            if cycle > 1:
+
+                backbones = chain_remover.run(
+                    poses = backbones,
+                    prefix = f"cycle_{cycle}_remove_ligand",
+                    chains = args.ligand_chain
+                )
+
+                logging.info("Adding ligand to ESMFold predictions...")
+                backbones = chain_adder.superimpose_add_chain(
+                poses = backbones,
+                prefix = f"cycle_{cycle}_reset_ligand",
+                ref_col = "updated_reference_frags_location",
+                target_motif = "fixed_residues",
+                copy_chain = args.ligand_chain
+                )
+
             logging.info("Threading sequences on poses with LigandMPNN...")
             # run ligandmpnn, return pdbs as poses
             backbones = ligand_mpnn.run(
@@ -1508,6 +1526,22 @@ def main(args):
             mutations = pd.read_csv(args.variants_mutations_csv)
             backbones.df = mutations.merge(backbones.df, on="poses_description")
             backbones.df["variants_pose_opts"] = backbones.df.apply(lambda row: omit_AAs(row['omit_AAs'], row['allow_AAs']), axis=1)
+
+        #reset ligand position
+        backbones = chain_remover.run(
+            poses = backbones,
+            prefix = f"variants_remove_ligand",
+            chains = args.ligand_chain
+        )
+
+        logging.info("Adding ligand to ESMFold predictions...")
+        backbones = chain_adder.superimpose_add_chain(
+        poses = backbones,
+        prefix = f"variants_reset_ligand",
+        ref_col = "updated_reference_frags_location",
+        target_motif = "fixed_residues",
+        copy_chain = args.ligand_chain
+        )
 
         backbones.df[f'variants_bbopt_opts'] = [write_bbopt_opts(row=row, cycle=1, total_cycles=1, reference_location_col="updated_reference_frags_location", cat_res_col="fixed_residues", motif_res_col="motif_residues", ligand_chain=args.ligand_chain) for _, row in backbones.df.iterrows()]
 
