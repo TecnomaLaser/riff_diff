@@ -169,7 +169,7 @@ def instantiate_trajectory_plotting(plot_dir, df):
     postrelax_motif_catres_rmsd_traj = plots.PlottingTrajectory(y_label="RMSD [\u00C5]", location=os.path.join(plot_dir, "trajectory_postrelax_fixedres_catres.png"), title="Postrelax Fixed Residues\nSidechain RMSD Trajectory", dims=(0,5))
     delta_apo_holo_traj = plots.PlottingTrajectory(y_label="Rosetta delta total score [REU]", location=os.path.join(plot_dir, "trajectory_delta_apo_holo.png"), title="Delta Apo Holo Total Score Trajectory")
     postrelax_ligand_rmsd_traj = plots.PlottingTrajectory(y_label="RMSD [\u00C5]", location=os.path.join(plot_dir, "trajectory_postrelax_ligand_rmsd.png"), title="Postrelax Ligand\nRMSD Trajectory", dims=(0,5))
-    sap_score_traj = plots.PlottingTrajectory(y_label="Spatial Aggregation Propensity", location=os.path.join(plot_dir, "trajectory_sap_score.png"), title="SAP Score Trajectory", dims=(0,5))
+    sap_score_traj = plots.PlottingTrajectory(y_label="Spatial Aggregation Propensity", location=os.path.join(plot_dir, "trajectory_sap_score.png"), title="SAP Score Trajectory", dims=(0,250))
     return {'esm_plddt': esm_plddt_traj, 'esm_backbone_rmsd': esm_bb_ca_rmsd_traj, 'esm_catres_bb_rmsd': esm_motif_ca_rmsd_traj, 'esm_catres_heavy_rmsd': esm_catres_rmsd_traj, 'fastrelax_total_score': fastrelax_total_score_traj, 'postrelax_catres_heavy_rmsd': postrelax_motif_catres_rmsd_traj, 'postrelax_catres_bb_rmsd': postrelax_motif_ca_rmsd_traj, 'delta_apo_holo': delta_apo_holo_traj, 'postrelax_ligand_rmsd': postrelax_ligand_rmsd_traj, 'fastrelax_sap_score_mean': sap_score_traj}
 
 def update_trajectory_plotting(trajectory_plots:dict, df:pd.DataFrame, cycle:int):
@@ -275,6 +275,8 @@ def create_final_results_dir(poses, dir:str):
         show_fig=False
     )
 
+    poses.df.sort_values("final_composite_score", ascending=True, inplace=True)
+    poses.df.reset_index(drop=True, inplace=True)
     poses.save_poses(out_path=dir)
     poses.save_poses(out_path=dir, poses_col="input_poses")
     poses.save_scores(out_path=dir)
@@ -298,7 +300,7 @@ def create_variants_results_dir(poses, dir:str):
     os.makedirs(dir, exist_ok=True)
 
     logging.info(f"Plotting final outputs.")
-    cols = ["variants_AF2_plddt", "variants_AF2_mean_plddt", "variants_AF2_backbone_rmsd", "variants_AF2_catres_heavy_rmsd", "variants_AF2_fastrelax_total_score", "variants_AF2_postrelax_catres_heavy_rmsd", "variants_AF2_postrelax_catres_bb_rmsd", "variants_AF2_delta_apo_holo", "variants_AF2_catres_heavy_rmsd_mean", "variants_AF2_postrelax_catres_heavy_rmsd_mean", "variants_AF2_postrelax_ligand_rmsd", "variants_AF2_postrelax_ligand_rmsd_mean", "variants_AF2_fastrelax_sap_score_mean"]
+    cols = ["variants_AF2_plddt", "variants_AF2_plddt_mean", "variants_AF2_backbone_rmsd", "variants_AF2_catres_heavy_rmsd", "variants_AF2_fastrelax_total_score", "variants_AF2_postrelax_catres_heavy_rmsd", "variants_AF2_postrelax_catres_bb_rmsd", "variants_AF2_delta_apo_holo", "variants_AF2_catres_heavy_rmsd_mean", "variants_AF2_postrelax_catres_heavy_rmsd_mean", "variants_AF2_postrelax_ligand_rmsd", "variants_AF2_postrelax_ligand_rmsd_mean", "variants_AF2_fastrelax_sap_score_mean"]
     titles = ["AF2 pLDDT", "mean AF2 pLDDT", "AF2 BB-Ca RMSD", "AF2 Sidechain\nRMSD", "Rosetta total_score", "Relaxed Sidechain\nRMSD", "Relaxed BB-Ca RMSD", "Delta Apo Holo", "Mean AF2 Sidechain\nRMSD", "Mean Relaxed Sidechain\nRMSD", "Postrelax Ligand\nRMSD", "Mean Postrelax Ligand\nRMSD", "Spatial Aggregation\nPropensity"]
     y_labels = ["pLDDT", "pLDDT", "Angstrom", "Angstrom", "[REU]", "Angstrom", "Angstrom", "[REU]", "Angstrom", "Angstrom", "Angstrom", "Angstrom", "SAP score"]
     dims = [(0,100), (0,100), (0,5), (0,5), None, (0,5), (0,5), None, (0,5), (0,5), (0,5), (0,5), None]
@@ -447,9 +449,6 @@ def combine_screening_results(dir: str, prefixes: list, scores: list, weights: l
     poses.df.reset_index(drop=True, inplace=True)
     poses.save_scores(out_path=os.path.join(out_dir, 'screening_results_all.json'))
 
-
-    
-
     logging.info(f"Writing pymol alignment script for screening results at {out_dir}")
     write_pymol_alignment_script(
         df=poses.df,
@@ -466,8 +465,11 @@ def combine_screening_results(dir: str, prefixes: list, scores: list, weights: l
     poses.save_poses(out_path=out_dir, poses_col="input_poses")
 
     # save successful input motifs
+    counts = poses.df["input_poses"].value_counts()
+    poses.df["successful_screening_results"] = poses.df["input_poses"].map(counts)
     unique = poses.df.drop_duplicates(subset=["input_poses"], keep="first")
     successfull_motifs = input_motifs.df.merge(unique['input_poses'], on="input_poses")
+    successfull_motifs.sort_values("successful_screening_results", ascending=False, inplace=True)
     successfull_motifs.reset_index(drop=True, inplace=True)
     successfull_motifs.to_json(os.path.join(out_dir, "successful_input_motifs.json"))
 
@@ -514,27 +516,27 @@ def create_reduced_motif(fixed_res:protflow.residues.ResidueSelection, motif_res
 def aa_one_letter_code() -> str:
     return "ARDNCEQGHILKMFPSTWYV"
 
-def omit_AAs(omitted_aas:str, allowed_aas:str) -> str:
+def omit_AAs(omitted_aas:str, allowed_aas:str, dir:str, name:str) -> str:
     mutations_dict = {}
     if not allowed_aas and not omitted_aas:
         return None
-    elif allowed_aas and omitted_aas:
-        raise ValueError("omitted_aas and allowed_aas are mutually exclusive!")
-    elif omitted_aas:
+    if isinstance(omitted_aas, str):
         omitted_aas = omitted_aas.split(";")
         for mutation in omitted_aas:
             position, omitted_aas = mutation.split(":")
             mutations_dict[position.strip()] = omitted_aas.strip()
-            return f"--omit_AA_per_residue {mutations_dict}" 
-    elif allowed_aas:
+    if isinstance(allowed_aas, str):
         allowed_aas = allowed_aas.split(";")
         for mutation in allowed_aas:
             position, allowed_aas = mutation.split(":")
             all_aas = aa_one_letter_code()
             for aa in allowed_aas:
-                all_aas.remove(aa)
-            mutations_dict[position.strip()] = all_aas.strip()   
-            return f"--omit_AA_per_residue {mutations_dict}" 
+                all_aas = all_aas.replace(aa.upper(), "")
+            mutations_dict[position.strip()] = all_aas.upper().strip()
+    filename = os.path.join(dir, f"{name}_mutations.json")
+    with open(filename, "w") as out:
+        json.dump(mutations_dict, out)
+    return f"--omit_AA_per_residue {filename}" 
 
 def log_cmd(arguments):
     cmd = ''
@@ -542,6 +544,12 @@ def log_cmd(arguments):
         cmd += f'--{key} {value} '
     cmd = f'{sys.argv[0]} {cmd}'
     logging.info(f"{sys.argv[0]} {cmd}")
+
+def determine_last_ref_cycle(df: pd.DataFrame) -> int:
+    cols = [col for col in df.columns if col.startswith("cycle_")]
+    nums = [int(col.split("_")[1]) for col in cols]
+    last_cycle = max(nums)
+    return last_cycle
 
 
 def main(args):
@@ -1131,7 +1139,7 @@ def main(args):
 
             # remove ligand and add it back to make sure theozyme orientation is used and not the relaxed output from the previous cycle!
             if cycle > 1:
-
+                logging.info("Removing ligand from relaxed poses...")
                 backbones = chain_remover.run(
                     poses = backbones,
                     prefix = f"cycle_{cycle}_remove_ligand",
@@ -1343,9 +1351,11 @@ def main(args):
         if args.eval_input_json:
             logging.info(f"Reading in evaluation input poses from {args.eval_input_json}!")
             backbones = protflow.poses.Poses(poses=args.eval_input_json)
-            logging.warning(f"Using data from refinement cycle {args.ref_cycles}. Make sure this is the correct one when reading in evaluation input poses from file!")
             for res_col in residue_cols:
                 backbones.df[res_col] = [protflow.residues.ResidueSelection(motif, from_scorefile=True) for motif in backbones.df[res_col].to_list()]
+
+        last_ref_cycle = determine_last_ref_cycle(backbones.df)
+        logging.info(f"Last refinement cycle determined as: {last_ref_cycle}")
         
         if args.eval_drop_previous_results:
             eval_cols = [col for col in backbones.df.columns if col.startswith("final")]
@@ -1354,11 +1364,11 @@ def main(args):
         backbones.set_work_dir(os.path.join(args.output_dir, f"{eval_prefix}evaluation"))
 
         if args.eval_input_poses_per_bb:
-            logging.info(f"Filtering evaluation input poses on per backbone level according to cycle_{args.ref_cycles}_refinement_composite_score...")
-            backbones.filter_poses_by_rank(n=args.eval_input_poses_per_bb, score_col=f"cycle_{args.ref_cycles}_refinement_composite_score", remove_layers=1, prefix="evaluation_input_per_bb", plot=True)
+            logging.info(f"Filtering evaluation input poses on per backbone level according to cycle_{last_ref_cycle}_refinement_composite_score...")
+            backbones.filter_poses_by_rank(n=args.eval_input_poses_per_bb, score_col=f"cycle_{last_ref_cycle}_refinement_composite_score", remove_layers=1, prefix="evaluation_input_per_bb", plot=True)
         if args.eval_input_poses: 
-            logging.info(f"Filtering evaluation input poses according to cycle_{args.ref_cycles}_refinement_composite_score...")
-            backbones.filter_poses_by_rank(n=args.eval_input_poses, score_col=f"cycle_{args.ref_cycles}_refinement_composite_score", prefix="evaluation_input", plot=True)
+            logging.info(f"Filtering evaluation input poses according to cycle_{last_ref_cycle}_refinement_composite_score...")
+            backbones.filter_poses_by_rank(n=args.eval_input_poses, score_col=f"cycle_{last_ref_cycle}_refinement_composite_score", prefix="evaluation_input", plot=True)
 
         evaluation_input_poses_dir = os.path.join(backbones.work_dir, "evaluation_input_poses")
         os.makedirs(evaluation_input_poses_dir, exist_ok=True)
@@ -1370,7 +1380,7 @@ def main(args):
         logging.info(f"Writing pymol alignment script for evaluation input poses at {evaluation_input_poses_dir}.")
         write_pymol_alignment_script(
             df = backbones.df,
-            scoreterm = f"cycle_{args.ref_cycles}_refinement_composite_score",
+            scoreterm = f"cycle_{last_ref_cycle}_refinement_composite_score",
             top_n = np.min([len(backbones.df.index), 25]),
             path_to_script = os.path.join(evaluation_input_poses_dir, "align_input_poses.pml"),
             ref_motif_col = "template_fixedres",
@@ -1385,17 +1395,19 @@ def main(args):
         backbones = colabfold.run(
             poses=backbones,
             prefix="final_AF2",
-            return_top_n_poses=5
+            return_top_n_poses=3
         )
 
+        # select top 3 predictions and filter for average score
+        backbones.calculate_mean_score(name="final_AF2_mean_plddt", score_col="final_AF2_plddt", remove_layers=1)
         backbones.filter_poses_by_value(score_col="final_AF2_mean_plddt", value=args.eval_mean_plddt_cutoff, operator=">=", prefix="final_AF2_mean_plddt", plot=True)
 
         # calculate backbone rmsds
         backbones = catres_motif_bb_rmsd.run(poses=backbones, prefix=f"final_AF2_catres_bb")
-        backbones = bb_rmsd.run(poses=backbones, prefix="final_AF2_backbone", ref_col=f"cycle_{args.ref_cycles}_bbopt_location")
-        backbones = bb_rmsd.run(poses=backbones, prefix="final_AF2_ESM_bb", ref_col=f"cycle_{args.ref_cycles}_esm_location")
-        backbones = tm_score_calculator.run(poses=backbones, prefix=f"final_AF2_tm", ref_col=f"cycle_{args.ref_cycles}_bbopt_location")
-        backbones = tm_score_calculator.run(poses=backbones, prefix=f"final_AF2_ESM_tm", ref_col=f"cycle_{args.ref_cycles}_esm_location")
+        backbones = bb_rmsd.run(poses=backbones, prefix="final_AF2_backbone", ref_col=f"cycle_{last_ref_cycle}_bbopt_location")
+        backbones = bb_rmsd.run(poses=backbones, prefix="final_AF2_ESM_bb", ref_col=f"cycle_{last_ref_cycle}_esm_location")
+        backbones = tm_score_calculator.run(poses=backbones, prefix=f"final_AF2_tm", ref_col=f"cycle_{last_ref_cycle}_bbopt_location")
+        backbones = tm_score_calculator.run(poses=backbones, prefix=f"final_AF2_ESM_tm", ref_col=f"cycle_{last_ref_cycle}_esm_location")
         backbones = calculate_mean_scores(poses=backbones, scores=["final_AF2_catres_bb_rmsd", "final_AF2_backbone_rmsd", "final_AF2_tm_TM_score_ref"], remove_layers=1)
 
         if args.attnpacker_repack:
@@ -1499,9 +1511,13 @@ def main(args):
         )
 
         backbones.reindex_poses(prefix="final_reindex", remove_layers=2 if not args.attnpacker_repack else 3)
-        #backbones.filter_poses_by_rank(n=25, score_col='final_composite_score', prefix="final_composite_score", plot=True)
-        if not args.eval_input_json:
-            trajectory_plots = add_final_data_to_trajectory_plots(backbones.df, trajectory_plots)
+
+        # create plot for screening, refinement and evaluation
+        trajectory_plots = instantiate_trajectory_plotting(plot_dir=backbones.plots_dir, df=backbones.df)
+        for cycle in range(1, last_ref_cycle + 1):
+            trajectory_plots = update_trajectory_plotting(trajectory_plots, backbones.df, cycle)
+        trajectory_plots = add_final_data_to_trajectory_plots(backbones.df, trajectory_plots)
+
         eval_results_dir = os.path.join(args.output_dir, f"{eval_prefix}evaluation_results")
         create_final_results_dir(backbones, eval_results_dir)
         backbones.save_scores()
@@ -1524,8 +1540,17 @@ def main(args):
 
         if args.variants_mutations_csv:
             mutations = pd.read_csv(args.variants_mutations_csv)
-            backbones.df = mutations.merge(backbones.df, on="poses_description")
-            backbones.df["variants_pose_opts"] = backbones.df.apply(lambda row: omit_AAs(row['omit_AAs'], row['allow_AAs']), axis=1)
+            backbones.df = backbones.df.merge(mutations, on="poses_description", how="right")
+            backbones.df.reset_index(drop=True, inplace=True)
+            mutations_dir = os.path.join(backbones.work_dir, "mutations")
+            os.makedirs(mutations_dir, exist_ok=True)
+            backbones.df["variants_pose_opts"] = backbones.df.apply(lambda row: omit_AAs(row['omit_AAs'], row['allow_AAs'], mutations_dir, row["poses_description"]), axis=1)
+
+        if args.variants_input_poses_per_bb:
+            backbones.filter_poses_by_rank(n=args.variants_input_poses_per_bb, score_col="final_composite_score", remove_layers=1)
+
+        if args.variants_input_poses:
+            backbones.filter_poses_by_rank(n=args.variants_input_poses, score_col="final_composite_score")
 
         #reset ligand position
         backbones = chain_remover.run(
@@ -1561,7 +1586,7 @@ def main(args):
         backbones = ligand_mpnn.run(
             poses = backbones,
             prefix = f"variants_mpnn",
-            nseq = 25,
+            nseq = 60,
             model_type = "ligand_mpnn",
             options = ligandmpnn_options,
             pose_options = "variants_pose_opts" if args.variants_mutations_csv else None,
@@ -1669,7 +1694,7 @@ def main(args):
             score_col="variants_composite_score",
             prefix="variants_composite_score_per_bb",
             plot=True,
-            remove_layers=1
+            remove_layers=2
         )
 
         backbones.filter_poses_by_rank(
@@ -1686,10 +1711,12 @@ def main(args):
         backbones = colabfold.run(
             poses=backbones,
             prefix="variants_AF2",
-            return_top_n_poses=5
+            return_top_n_poses=3
         )
 
-        backbones.filter_poses_by_value(score_col="variants_AF2_mean_plddt", value=args.eval_mean_plddt_cutoff, operator=">=", prefix="variants_AF2_mean_plddt", plot=True)
+        # select top 3 predictions and filter for average score
+        backbones.calculate_mean_score(name="variants_AF2_plddt_mean", score_col="variants_AF2_plddt", remove_layers=1)
+        backbones.filter_poses_by_value(score_col="variants_AF2_plddt_mean", value=args.eval_mean_plddt_cutoff, operator=">=", prefix="variants_AF2_plddt_mean", plot=True)
 
         # calculate backbone rmsds
         backbones = catres_motif_bb_rmsd.run(poses=backbones, prefix=f"variants_AF2_catres_bb")
@@ -1802,6 +1829,9 @@ def main(args):
         backbones.reindex_poses(prefix="variants_AF2_reindex", remove_layers=2 if not args.attnpacker_repack else 3)
         #backbones.filter_poses_by_rank(n=25, score_col='final_composite_score', prefix="final_composite_score", plot=True)
 
+        # filter for unique diffusion backbones
+        backbones.filter_poses_by_rank(n=5, score_col="variants_AF2_composite_score", remove_layers=2)
+
         create_variants_results_dir(backbones, os.path.join(args.output_dir, f"{variants_prefix}variants_results"))
         backbones.save_scores()
 
@@ -1873,9 +1903,11 @@ if __name__ == "__main__":
     argparser.add_argument("--variants_prefix", type=str, default=None, help="Prefix for variant generation runs for testing different variants.")
     argparser.add_argument("--variants_input_json", type=str, default=None, help="Read in a custom json containing poses from evaluation output.")
     argparser.add_argument("--variants_mutations_csv", type=str, default=None, help="Read in a custom csv containing poses description and mutation columns.")
+    argparser.add_argument("--variants_input_poses_per_bb", type=int, default=5, help="Number of poses per unique backbone that should go into the evaluation step of variant generation.")
+    argparser.add_argument("--variants_input_poses", type=int, default=50, help="Number of poses per unique backbone that should go into the evaluation step of variant generation.")
     argparser.add_argument("--variants_num_poses_per_bb", type=int, default=5, help="Read in a custom csv containing poses description and mutation columns.")
-    argparser.add_argument("--variants_evaluation_input_poses_per_bb", type=int, default=15, help="Number of poses per unique backbone that should go into the evaluation step of variant generation.")
-    argparser.add_argument("--variants_evaluation_input_poses", type=int, default=100, help="Number of poses per unique backbone that should go into the evaluation step of variant generation.")
+    argparser.add_argument("--variants_evaluation_input_poses_per_bb", type=int, default=30, help="Number of poses per unique backbone that should go into the evaluation step of variant generation.")
+    argparser.add_argument("--variants_evaluation_input_poses", type=int, default=200, help="Number of poses per unique backbone that should go into the evaluation step of variant generation.")
 
     # rfdiffusion optionals
     argparser.add_argument("--as_model_path", type=str, default="/home/mabr3112/RFdiffusion/models/ActiveSite_ckpt.pt")
