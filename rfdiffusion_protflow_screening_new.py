@@ -1399,8 +1399,8 @@ def main(args):
         )
 
         # select top 3 predictions and filter for average score
-        backbones.calculate_mean_score(name="final_AF2_mean_plddt", score_col="final_AF2_plddt", remove_layers=1)
-        backbones.filter_poses_by_value(score_col="final_AF2_mean_plddt", value=args.eval_mean_plddt_cutoff, operator=">=", prefix="final_AF2_mean_plddt", plot=True)
+        backbones.calculate_mean_score(name="final_AF2_plddt_mean", score_col="final_AF2_plddt", remove_layers=1)
+        backbones.filter_poses_by_value(score_col="final_AF2_plddt_mean", value=args.eval_mean_plddt_cutoff, operator=">=", prefix="final_AF2_mean_plddt", plot=True)
 
         # calculate backbone rmsds
         backbones = catres_motif_bb_rmsd.run(poses=backbones, prefix=f"final_AF2_catres_bb")
